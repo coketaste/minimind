@@ -19,6 +19,8 @@ from torch import Tensor
 from torch.nn.parallel import DistributedDataParallel
 from transformers import AutoTokenizer
 
+from trainer.device_utils import default_device_str
+
 
 # ===== 计算每个 token 的 logprob =====
 def compute_per_token_logps(model, input_ids: Tensor, n_keep: int, attention_mask: Optional[Tensor] = None) -> Tensor:
@@ -63,7 +65,6 @@ class RolloutEngine(ABC):
 # ===== PyTorch 原生推理引擎 =====
 class TorchRolloutEngine(RolloutEngine):
     def __init__(self, policy_model: torch.nn.Module, tokenizer, device: str = None, autocast_ctx=None):
-        from trainer.device_utils import default_device_str
         self.policy_model = policy_model
         self.tokenizer = tokenizer
         self.device = device if device is not None else default_device_str()

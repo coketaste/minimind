@@ -2,12 +2,16 @@ import random
 import re
 import json
 import os
+import sys
 from threading import Thread
 
 import torch
 import numpy as np
 import streamlit as st
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from trainer.device_utils import default_device_str
 
 st.set_page_config(page_title="MiniMind", initial_sidebar_state="collapsed")
 
@@ -67,7 +71,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-device = f"cuda:{torch.cuda.current_device()}" if torch.cuda.is_available() else "cpu"
+device = default_device_str()
 
 # 多语言文本
 LANG_TEXTS = {

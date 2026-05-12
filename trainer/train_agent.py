@@ -15,7 +15,6 @@ import warnings
 import torch
 import torch.nn.functional as F
 import torch.distributed as dist
-from contextlib import nullcontext
 from torch import optim
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader, DistributedSampler
@@ -95,7 +94,9 @@ def execute_tool(name, args):
         except: pass
 
 # ======== 多轮 Rollout ========
-def rollout_single(rollout_engine, tokenizer, messages, tools, max_turns=3, max_new_tokens=256, thinking_ratio=0.5, device="cuda"):
+def rollout_single(rollout_engine, tokenizer, messages, tools, max_turns=3, max_new_tokens=256, thinking_ratio=0.5, device=None):
+    if device is None:
+        device = default_device_str()
     all_outputs = []
     prompt_ids = None
     response_ids = []
@@ -156,7 +157,9 @@ def rollout_single(rollout_engine, tokenizer, messages, tools, max_turns=3, max_
     prompt_ids = prompt_ids or []
     return final_output, final_context, prompt_ids, response_ids, response_mask, response_old_logps, list(all_outputs), unfinished
 
-def rollout_batch(rollout_engine, tokenizer, messages_batch, tools_batch, num_gen, max_turns=3, max_new_tokens=256, thinking_ratio=0.5, device="cuda"):
+def rollout_batch(rollout_engine, tokenizer, messages_batch, tools_batch, num_gen, max_turns=3, max_new_tokens=256, thinking_ratio=0.5, device=None):
+    if device is None:
+        device = default_device_str()
     all_completions = []
     all_contexts = []
     all_prompt_ids = []
@@ -185,7 +188,9 @@ def validate_gt_in_text(text, gt_list):
     nums = [float(x) for x in re.findall(r'(?<![\w.])[-+]?\d+(?:\.\d+)?(?![\w.])', text_num)]
     return {g for g in gt_list if ((s := str(g).strip()) and s.lower() in text.lower()) or (re.fullmatch(r'[-+]?\d+(?:\.\d+)?', str(g).strip().replace(',', '')) and any(abs(float(str(g).strip().replace(',', '')) - n) < 1e-6 for n in nums))}
 
-def calculate_rewards(prompts, completions, gt_batch, tools_batch, num_gen, reward_model=None, device="cuda", turn_outputs_batch=None, unfinished_batch=None):
+def calculate_rewards(prompts, completions, gt_batch, tools_batch, num_gen, reward_model=None, device=None, turn_outputs_batch=None, unfinished_batch=None):
+    if device is None:
+        device = default_device_str()
     rewards = torch.zeros(len(completions), device=device)
     for idx, response in enumerate(completions):
         reward, answer = 0.0, response

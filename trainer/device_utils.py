@@ -124,13 +124,20 @@ class DeviceCtx:
     def from_arg(cls, device: Union[str, torch.device]) -> "DeviceCtx":
         """根据用户显式传入的 device 字符串构造（如 argparse --device 的结果）。
 
-        尊重用户的 --device cpu 强制 CPU 选择。
+        - 'cpu' / torch.device('cpu')             → CPU ctx
+        - 'cuda'                                   → 归一化为 'cuda:0'（避免 bare-cuda 在 DDP 外露依赖于 current_device()）
+        - 'cuda:N' / torch.device('cuda', N)       → GPU ctx
+        - 其他字符串                               → ValueError（避免静默把 'mps'、'xpu'、笔误等当 CPU 处理）
         """
         s = str(device)
-        if "cuda" in s:
+        if s == "cpu":
+            return cls(device="cpu", vendor="cpu")
+        if s == "cuda" or s.startswith("cuda:"):
             v: VendorLit = "rocm" if is_rocm() else "cuda"
-            return cls(device=s, vendor=v)
-        return cls(device="cpu", vendor="cpu")
+            return cls(device="cuda:0" if s == "cuda" else s, vendor=v)
+        raise ValueError(
+            f"Unsupported device string {s!r}; expected 'cpu', 'cuda' or 'cuda:N'."
+        )
 
     @classmethod
     def auto(cls, local_rank: int = 0) -> "DeviceCtx":

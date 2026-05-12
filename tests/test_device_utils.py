@@ -60,6 +60,27 @@ def test_print_device_info_prints_something(capsys):
     assert "[device]" in captured.out
 
 
+def test_print_device_info_includes_vendor_and_backend(capsys):
+    """The startup banner must surface vendor + dist_backend so users can spot
+    misconfigured (e.g. accidentally CPU) environments at a glance."""
+    print_device_info()
+    out = capsys.readouterr().out
+    assert vendor_name() in out
+    if torch.cuda.is_available():
+        # On GPU we also expect the version string and backend name to be visible.
+        assert ("CUDA" in out) or ("ROCm" in out)
+        assert dist_backend() in out
+
+
+def test_set_current_device_is_callable_on_gpu():
+    """set_current_device() must actually bind the current CUDA device when a GPU
+    is present. CPU-only boxes are skipped — there's nothing to bind."""
+    if not torch.cuda.is_available():
+        pytest.skip("no GPU to bind")
+    set_current_device(0)
+    assert torch.cuda.current_device() == 0
+
+
 # ---------- DeviceCtx.from_arg + properties ----------
 
 def test_from_arg_cpu():
@@ -79,10 +100,31 @@ def test_from_arg_cuda_string_preserves_index():
     assert d.vendor in {"cuda", "rocm"}
 
 
-def test_from_arg_bare_cuda():
+def test_from_arg_bare_cuda_normalizes_to_index_zero():
+    """'cuda' (no index) should be normalized to 'cuda:0' to avoid downstream code
+    that does .device.split(':')[1] or relies on torch.cuda.current_device()."""
     d = DeviceCtx.from_arg("cuda")
-    assert d.device == "cuda"
+    assert d.device == "cuda:0"
     assert d.amp_type == "cuda"
+    assert d.is_gpu is True
+
+
+def test_from_arg_rejects_unknown_device_string():
+    """Unsupported device strings must raise ValueError, not silently fall through."""
+    for bad in ("mps", "xpu", "my-cuda-device", "acuda", "cuda0", "CUDA:0", ""):
+        with pytest.raises(ValueError):
+            DeviceCtx.from_arg(bad)
+
+
+def test_from_arg_accepts_torch_device():
+    """torch.device(...) input should be accepted (commonly returned by torch APIs)."""
+    d_cpu = DeviceCtx.from_arg(torch.device("cpu"))
+    assert d_cpu.device == "cpu"
+    assert d_cpu.vendor == "cpu"
+
+    d_gpu = DeviceCtx.from_arg(torch.device("cuda", 1))
+    assert d_gpu.device == "cuda:1"
+    assert d_gpu.amp_type == "cuda"
 
 
 def test_deviceCtx_is_frozen():
@@ -108,6 +150,15 @@ def test_for_rank_noop_on_cpu():
     d2 = d.for_rank(7)
     assert d2.device == "cpu"
     assert d2.vendor == "cpu"
+
+
+def test_for_rank_works_on_normalized_bare_cuda():
+    """After bare 'cuda' is normalized to 'cuda:0', for_rank() should still re-bind."""
+    d = DeviceCtx.from_arg("cuda")
+    assert d.device == "cuda:0"
+    d2 = d.for_rank(5)
+    assert d2.device == "cuda:5"
+    assert d2.vendor == d.vendor
 
 
 # ---------- DeviceCtx.autocast ----------

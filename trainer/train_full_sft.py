@@ -9,7 +9,6 @@ import time
 import warnings
 import torch
 import torch.distributed as dist
-from contextlib import nullcontext
 from torch import optim, nn
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader, DistributedSampler
