@@ -67,7 +67,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device = f"cuda:{torch.cuda.current_device()}" if torch.cuda.is_available() else "cpu"
 
 # 多语言文本
 LANG_TEXTS = {

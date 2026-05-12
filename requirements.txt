@@ -1,3 +1,10 @@
+# ============================================================================
+# 安装 PyTorch (二选一，根据 GPU 厂商):
+#   NVIDIA CUDA 12.8: pip install torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cu128
+#   AMD ROCm 7.1:     pip install torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/rocm7.1
+# 其他依赖 (CPU 上也能装):
+#   pip install -r requirements.txt
+# ============================================================================
 datasets==3.6.0
 datasketch==1.6.4
 Flask==3.0.3
@@ -28,5 +35,5 @@ streamlit==1.50.0
 einops==0.8.1
 swanlab==0.7.11
 modelscope==1.30.0
-# torch==2.6.0
-# torchvision==0.21.0
+# torch==2.10.0
+# torchvision==0.25.0

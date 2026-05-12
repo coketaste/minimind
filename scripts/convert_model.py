@@ -10,6 +10,7 @@ import warnings
 from transformers import AutoTokenizer, AutoModelForCausalLM, Qwen3Config, Qwen3ForCausalLM, Qwen3MoeConfig, Qwen3MoeForCausalLM
 from model.model_minimind import MiniMindConfig, MiniMindForCausalLM
 from model.model_lora import apply_lora, merge_lora
+from trainer.device_utils import get_default_device
 
 warnings.filterwarnings('ignore', category=UserWarning)
 
@@ -17,7 +18,7 @@ def convert_torch2transformers_minimind(torch_path, transformers_path, dtype=tor
     MiniMindConfig.register_for_auto_class()
     MiniMindForCausalLM.register_for_auto_class("AutoModelForCausalLM")
     lm_model = MiniMindForCausalLM(lm_config)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device(get_default_device())
     state_dict = torch.load(torch_path, map_location=device)
     lm_model.load_state_dict(state_dict, strict=False)
     lm_model = lm_model.to(dtype)  # 转换模型权重精度
@@ -38,7 +39,7 @@ def convert_torch2transformers_minimind(torch_path, transformers_path, dtype=tor
 
 # QwenForCausalLM/LlamaForCausalLM结构兼容生态
 def convert_torch2transformers(torch_path, transformers_path, dtype=torch.float16):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device(get_default_device())
     state_dict = torch.load(torch_path, map_location=device)
     common_config = {
         "vocab_size": lm_config.vocab_size,
@@ -103,7 +104,7 @@ def convert_transformers2torch(transformers_path, torch_path):
 
 
 def convert_merge_base_lora(base_torch_path, lora_path, merged_torch_path):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device(get_default_device())
     lm_model = MiniMindForCausalLM(lm_config).to(device)
     state_dict = torch.load(base_torch_path, map_location=device)
     lm_model.load_state_dict(state_dict, strict=False)

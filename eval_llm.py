@@ -7,6 +7,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, TextStreamer
 from model.model_minimind import MiniMindConfig, MiniMindForCausalLM
 from model.model_lora import *
 from trainer.trainer_utils import setup_seed, get_model_params
+from trainer.device_utils import get_default_device
 warnings.filterwarnings('ignore')
 
 def init_model(args):
@@ -45,7 +46,7 @@ def main():
     parser.add_argument('--open_thinking', default=0, type=int, help="是否开启自适应思考（0=否，1=是）")
     parser.add_argument('--historys', default=0, type=int, help="携带历史对话轮数（需为偶数，0表示不携带历史）")
     parser.add_argument('--show_speed', default=1, type=int, help="显示decode速度（tokens/s）")
-    parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu', type=str, help="运行设备")
+    parser.add_argument('--device', default=get_default_device(), type=str, help="运行设备（自动检测 CUDA / ROCm / CPU）")
     args = parser.parse_args()
     
     prompts = [

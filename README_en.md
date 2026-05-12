@@ -226,10 +226,37 @@ After this update, maintenance for the entire `minimind-v1` series will be disco
 ## Step 0
 
 ```bash
-# Clone repository and install dependencies
+# Clone repository
 git clone --depth 1 https://github.com/jingyaogong/minimind
-cd minimind && pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
+cd minimind
+
+# Install PyTorch (pick one, based on GPU vendor)
+# NVIDIA CUDA 12.8
+pip install torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cu128
+# AMD ROCm 7.1
+pip install torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/rocm7.1
+
+# Install the rest of the dependencies
+pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 ```
+
+<details>
+<summary>Installing on AMD ROCm</summary>
+
+MiniMind centralizes GPU detection in `trainer/device_utils.py` so a single codebase works on both NVIDIA and AMD: distributed training (`torchrun`), mixed precision (`torch.amp`), and SDPA flash-attention all work unchanged on ROCm.
+- Recommended: ROCm `7.1` (latest stable) paired with the official PyTorch `2.10.0` `rocm7.1` wheel; for preview features the `rocm7.2` index is also available.
+- Sanity check device detection before training:
+  ```bash
+  python -c "from trainer.device_utils import print_device_info; print_device_info()"
+  ```
+  Expected output on AMD: `Detected AMD ROCm, device cuda:0 (...)`.
+- Multi-GPU DDP is identical to NVIDIA — PyTorch-ROCm exposes RCCL as the `"nccl"` backend:
+  ```bash
+  torchrun --nproc_per_node=N train_pretrain.py ...
+  ```
+- If your `gfx` arch isn't recognized by the official wheel (e.g. RX 7000 series), set `export HSA_OVERRIDE_GFX_VERSION=11.0.0`.
+
+</details>
 
 ## Ⅰ 🚀 Model Inference
 

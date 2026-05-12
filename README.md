@@ -227,10 +227,37 @@ minimind2系列旧模型均经过权重映射+（微调训练）QKVO线性层校
 ## 第0步
 
 ```bash
-# 克隆仓库、安装依赖
+# 克隆仓库
 git clone --depth 1 https://github.com/jingyaogong/minimind
-cd minimind && pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
+cd minimind
+
+# 安装 PyTorch（二选一，根据 GPU 厂商）
+# NVIDIA CUDA 12.8
+pip install torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cu128
+# AMD ROCm 7.1
+pip install torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/rocm7.1
+
+# 安装其余依赖
+pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 ```
+
+<details>
+<summary>AMD GPU + ROCm 安装说明</summary>
+
+MiniMind 的 GPU 处理通过 `trainer/device_utils.py` 自动检测厂商，CUDA 与 ROCm 共用同一份代码：分布式训练（`torchrun`）、混合精度（`torch.amp`）、SDPA flash-attention 在两种栈上都直接可用。  
+- 推荐 ROCm 版本：`7.1`（最新稳定版），配合 PyTorch `2.10.0` 的官方 `rocm7.1` wheel；如需更新预览特性可使用 `rocm7.2` index。  
+- 启动训练前可执行下述命令确认设备识别：  
+  ```bash
+  python -c "from trainer.device_utils import print_device_info; print_device_info()"
+  ```
+  正常应输出 `Detected AMD ROCm, device cuda:0 (...)`。  
+- 多卡 DDP 用法与 NVIDIA 完全一致（PyTorch-ROCm 将 RCCL 暴露为 `"nccl"` 后端）：  
+  ```bash
+  torchrun --nproc_per_node=N train_pretrain.py ...
+  ```
+- 若 `gfx` 架构未被官方 wheel 直接识别（如 RX 7000 系列），可设置环境变量：`export HSA_OVERRIDE_GFX_VERSION=11.0.0`。
+
+</details>
 
 ## Ⅰ 🚀 模型推理
 
