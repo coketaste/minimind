@@ -79,8 +79,21 @@ def set_current_device(local_rank: int) -> None:
         torch.cuda.set_device(local_rank)
 
 
+_DEVICE_INFO_PRINTED = False
+
+
 def print_device_info() -> None:
-    """启动时打印一次 GPU 诊断信息，方便在两套栈之间快速排错。"""
+    """启动时打印一次 GPU 诊断信息，方便在两套栈之间快速排错。
+
+    模块级幂等：多次调用只打印一次（distillation/PPO/GRPO 这种 init_model 被
+    调用多次的训练阶段，避免 banner 重复刷屏掩盖第一行）。测试可通过
+    reset_device_info_printed() 重置。
+    """
+    global _DEVICE_INFO_PRINTED
+    if _DEVICE_INFO_PRINTED:
+        return
+    _DEVICE_INFO_PRINTED = True
+
     vendor = vendor_name()
     if not torch.cuda.is_available():
         print(f"[device] {vendor}: 未检测到 GPU，将使用 CPU")
@@ -100,6 +113,12 @@ def print_device_info() -> None:
         f"[device] {vendor}: cuda:{idx} ({name}, {total_mem_gb:.1f} GiB), "
         f"{ver}, bf16={bf16_ok}, dist_backend={dist_backend()}"
     )
+
+
+def reset_device_info_printed() -> None:
+    """测试钩子：重置 print_device_info 的幂等标志。"""
+    global _DEVICE_INFO_PRINTED
+    _DEVICE_INFO_PRINTED = False
 
 
 # =========================================================================

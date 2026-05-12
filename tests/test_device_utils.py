@@ -12,9 +12,18 @@ from trainer.device_utils import (
     is_cuda_native,
     is_rocm,
     print_device_info,
+    reset_device_info_printed,
     set_current_device,
     vendor_name,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_print_device_info():
+    """每个测试前重置 print_device_info 的幂等标志，避免测试间干扰。"""
+    reset_device_info_printed()
+    yield
+    reset_device_info_printed()
 
 
 # ---------- module-level free functions ----------
@@ -70,6 +79,27 @@ def test_print_device_info_includes_vendor_and_backend(capsys):
         # On GPU we also expect the version string and backend name to be visible.
         assert ("CUDA" in out) or ("ROCm" in out)
         assert dist_backend() in out
+
+
+def test_print_device_info_is_idempotent(capsys):
+    """init_model() runs in distillation/PPO/GRPO multiple times per process;
+    print_device_info() must only emit the banner on the first call so the log
+    isn't dominated by duplicate banners."""
+    print_device_info()
+    first = capsys.readouterr().out
+    print_device_info()
+    second = capsys.readouterr().out
+    assert "[device]" in first
+    assert second == ""
+
+
+def test_reset_device_info_printed_re_enables_banner(capsys):
+    print_device_info()
+    capsys.readouterr()  # drain
+    reset_device_info_printed()
+    print_device_info()
+    out = capsys.readouterr().out
+    assert "[device]" in out
 
 
 def test_set_current_device_is_callable_on_gpu():
