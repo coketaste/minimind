@@ -10,7 +10,6 @@
 """
 from __future__ import annotations
 
-import contextlib
 from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import ContextManager, Literal, Union
