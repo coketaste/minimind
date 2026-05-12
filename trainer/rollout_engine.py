@@ -63,10 +63,10 @@ class RolloutEngine(ABC):
 # ===== PyTorch 原生推理引擎 =====
 class TorchRolloutEngine(RolloutEngine):
     def __init__(self, policy_model: torch.nn.Module, tokenizer, device: str = None, autocast_ctx=None):
-        from trainer.device_utils import get_default_device
+        from trainer.device_utils import default_device_str
         self.policy_model = policy_model
         self.tokenizer = tokenizer
-        self.device = device if device is not None else get_default_device()
+        self.device = device if device is not None else default_device_str()
         self.autocast_ctx = autocast_ctx
     
     def rollout(self, prompt_ids: Tensor, attention_mask: Tensor, num_generations: int, max_new_tokens: int, temperature: float = 0.8) -> RolloutResult:

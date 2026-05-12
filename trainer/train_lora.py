@@ -17,7 +17,7 @@ from model.model_minimind import MiniMindConfig
 from dataset.lm_dataset import SFTDataset
 from model.model_lora import save_lora, apply_lora
 from trainer.trainer_utils import get_lr, Logger, is_main_process, lm_checkpoint, init_distributed_mode, setup_seed, init_model, SkipBatchSampler
-from trainer.device_utils import get_default_device
+from trainer.device_utils import DeviceCtx, default_device_str
 
 warnings.filterwarnings('ignore')
 
@@ -82,7 +82,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=10, help="训练轮数")
     parser.add_argument("--batch_size", type=int, default=32, help="batch size")
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="初始学习率")
-    parser.add_argument("--device", type=str, default=get_default_device(), help="训练设备（自动检测 CUDA / ROCm / CPU）")
+    parser.add_argument("--device", type=str, default=default_device_str(), help="训练设备（自动检测 CUDA / ROCm / CPU）")
     parser.add_argument("--dtype", type=str, default="bfloat16", help="混合精度类型")
     parser.add_argument("--num_workers", type=int, default=8, help="数据加载线程数")
     parser.add_argument("--accumulation_steps", type=int, default=1, help="梯度累积步数")
@@ -103,7 +103,10 @@ if __name__ == "__main__":
 
     # ========== 1. 初始化环境和随机种子 ==========
     local_rank = init_distributed_mode()
-    if dist.is_initialized(): args.device = f"cuda:{local_rank}"
+    dev = DeviceCtx.from_arg(args.device)
+    if dist.is_initialized():
+        dev = dev.for_rank(local_rank)
+        args.device = dev.device
     setup_seed(42 + (dist.get_rank() if dist.is_initialized() else 0))
     
     # ========== 2. 配置目录、模型参数、检查ckp ==========
@@ -112,9 +115,7 @@ if __name__ == "__main__":
     ckp_data = lm_checkpoint(lm_config, weight=args.lora_name, save_dir='../checkpoints') if args.from_resume==1 else None
     
     # ========== 3. 设置混合精度 ==========
-    device_type = "cuda" if "cuda" in args.device else "cpu"
-    dtype = torch.bfloat16 if args.dtype == "bfloat16" else torch.float16
-    autocast_ctx = nullcontext() if device_type == "cpu" else torch.amp.autocast(device_type=device_type, dtype=dtype)
+    autocast_ctx = dev.autocast(args.dtype)
     
     # ========== 4. 配wandb ==========
     wandb = None
@@ -148,7 +149,7 @@ if __name__ == "__main__":
     # ========== 6. 定义数据和优化器 ==========
     train_ds = SFTDataset(args.data_path, tokenizer, max_length=args.max_seq_len)
     train_sampler = DistributedSampler(train_ds) if dist.is_initialized() else None
-    scaler = torch.amp.GradScaler(device_type, enabled=(args.dtype == 'float16'))
+    scaler = dev.grad_scaler(enabled=(args.dtype == 'float16'))
     optimizer = optim.AdamW(lora_params, lr=args.learning_rate)
     
     # ========== 7. 从ckp恢复状态 ==========
