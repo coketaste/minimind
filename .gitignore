@@ -7,3 +7,6 @@ docs-minimind/
 venv/
 .venv/
 minimind-3/
+checkpoints/
+dataset/*.jsonl
+.claude/
