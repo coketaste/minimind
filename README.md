@@ -244,14 +244,23 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 <details>
 <summary>AMD GPU + ROCm 安装说明</summary>
 
-MiniMind 的 GPU 处理通过 `trainer/device_utils.py` 自动检测厂商，CUDA 与 ROCm 共用同一份代码：分布式训练（`torchrun`）、混合精度（`torch.amp`）、SDPA flash-attention 在两种栈上都直接可用。  
-- 推荐 ROCm 版本：`7.1`（最新稳定版），配合 PyTorch `2.10.0` 的官方 `rocm7.1` wheel；如需更新预览特性可使用 `rocm7.2` index。  
-- 启动训练前可执行下述命令确认设备识别：  
+MiniMind 的 GPU 处理通过 `trainer/device_utils.py` 自动检测厂商，CUDA 与 ROCm 共用同一份代码：分布式训练（`torchrun`）、混合精度（`torch.amp`）、SDPA flash-attention 在两种栈上都直接可用。
+- 推荐 ROCm 版本：`7.1`（最新稳定版），配合 PyTorch `2.10.0` 的官方 `rocm7.1` wheel；如需更新预览特性可使用 `rocm7.2` index。
+- 启动训练前可执行下述命令确认设备识别（仓库根目录执行）：
   ```bash
   python -c "from trainer.device_utils import print_device_info; print_device_info()"
   ```
-  正常应输出 `Detected AMD ROCm, device cuda:0 (...)`。  
-- 多卡 DDP 用法与 NVIDIA 完全一致（PyTorch-ROCm 将 RCCL 暴露为 `"nccl"` 后端）：  
+  ROCm 上正常输出形如：
+  ```
+  [device] AMD ROCm: cuda:0 (AMD Instinct MI300X, 192.0 GiB), ROCm/HIP 7.1.xxxxx, bf16=True, dist_backend=nccl
+  ```
+  NVIDIA 上则会打印 `[device] NVIDIA CUDA: cuda:0 (...), CUDA 12.x, ...`。
+- 单元测试覆盖了设备检测的关键分支，可作为环境健康检查：
+  ```bash
+  python -m pytest tests/                           # 全量
+  HIP_VISIBLE_DEVICES="" CUDA_VISIBLE_DEVICES="" python -m pytest tests/   # 强制走 CPU 路径
+  ```
+- 多卡 DDP 用法与 NVIDIA 完全一致（PyTorch-ROCm 将 RCCL 暴露为 `"nccl"` 后端）：
   ```bash
   torchrun --nproc_per_node=N train_pretrain.py ...
   ```
@@ -302,13 +311,21 @@ vllm serve /path/to/model --served-model-name "minimind"
 <details>
 <summary>注：提前确认 Torch 的可用后端</summary>
 
-```python
-import torch
-print(torch.cuda.is_available())
+推荐使用 `device_utils` 提供的一行诊断命令（NVIDIA / AMD ROCm / CPU 通用）：
+
+```bash
+python -c "from trainer.device_utils import print_device_info; print_device_info()"
 ```
 
-若你计划使用 CUDA 训练，建议先确认当前环境是否已正确识别 GPU。  
-若 `cuda` 不可用，也仍可根据自身设备选择 `CPU` 或 `MPS` 运行，但训练速度与兼容性会有非常大的差异。  
+输出会显式标明厂商（`NVIDIA CUDA` / `AMD ROCm` / `CPU`）、当前设备索引、显存、框架版本、bf16 支持以及分布式后端。如需手动确认底层 API：
+
+```python
+import torch
+print(torch.cuda.is_available())   # NVIDIA 或 AMD ROCm 都返回 True
+print(getattr(torch.version, "hip", None))   # 非 None 即 ROCm wheel
+```
+
+若 `cuda` 不可用，也仍可根据自身设备选择 `CPU` 或 `MPS` 运行，但训练速度与兼容性会有非常大的差异。
 如需安装或更换 PyTorch 版本，可参考 [torch_stable](https://download.pytorch.org/whl/torch_stable.html) 与[链接](https://blog.csdn.net/weixin_45456738/article/details/141029610?ops_request_misc=&request_id=&biz_id=102&utm_term=%E5%AE%89%E8%A3%85torch&utm_medium=distribute.pc_search_result.none-task-blog-2~all~sobaiduweb~default-2-141029610.nonecase&spm=1018.2226.3001.4187)
 
 </details>

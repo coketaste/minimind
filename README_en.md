@@ -245,11 +245,20 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 
 MiniMind centralizes GPU detection in `trainer/device_utils.py` so a single codebase works on both NVIDIA and AMD: distributed training (`torchrun`), mixed precision (`torch.amp`), and SDPA flash-attention all work unchanged on ROCm.
 - Recommended: ROCm `7.1` (latest stable) paired with the official PyTorch `2.10.0` `rocm7.1` wheel; for preview features the `rocm7.2` index is also available.
-- Sanity check device detection before training:
+- Sanity check device detection before training (run from the repo root):
   ```bash
   python -c "from trainer.device_utils import print_device_info; print_device_info()"
   ```
-  Expected output on AMD: `Detected AMD ROCm, device cuda:0 (...)`.
+  On AMD you should see something like:
+  ```
+  [device] AMD ROCm: cuda:0 (AMD Instinct MI300X, 192.0 GiB), ROCm/HIP 7.1.xxxxx, bf16=True, dist_backend=nccl
+  ```
+  On NVIDIA the banner reads `[device] NVIDIA CUDA: cuda:0 (...), CUDA 12.x, ...`.
+- The repo also ships a small unit-test suite that exercises every device-detection branch — handy as an environment health check:
+  ```bash
+  python -m pytest tests/                                                  # full run
+  HIP_VISIBLE_DEVICES="" CUDA_VISIBLE_DEVICES="" python -m pytest tests/   # force the CPU path
+  ```
 - Multi-GPU DDP is identical to NVIDIA — PyTorch-ROCm exposes RCCL as the `"nccl"` backend:
   ```bash
   torchrun --nproc_per_node=N train_pretrain.py ...
@@ -301,13 +310,21 @@ vllm serve /path/to/model --served-model-name "minimind"
 <details>
 <summary>Note: Confirm Torch's available backend in advance</summary>
 
-```python
-import torch
-print(torch.cuda.is_available())
+The recommended one-liner ships with this repo and works for NVIDIA, AMD ROCm, and CPU alike:
+
+```bash
+python -c "from trainer.device_utils import print_device_info; print_device_info()"
 ```
 
-If you plan to use CUDA for training, it is recommended to first confirm whether the current environment has correctly recognized the GPU.  
-If `cuda` is not available, you can still choose `CPU` or `MPS` to run based on your device, but training speed and compatibility will differ significantly.  
+The banner explicitly reports vendor (`NVIDIA CUDA` / `AMD ROCm` / `CPU`), current device index, VRAM, framework version, bf16 support, and the distributed backend that will be selected. If you'd rather check the underlying API by hand:
+
+```python
+import torch
+print(torch.cuda.is_available())          # True for NVIDIA *and* AMD ROCm wheels
+print(getattr(torch.version, "hip", None))  # non-None means a ROCm wheel
+```
+
+If `cuda` is not available, you can still choose `CPU` or `MPS` to run based on your device, but training speed and compatibility will differ significantly.
 If you need to install or switch PyTorch versions, refer to [torch_stable](https://download.pytorch.org/whl/torch_stable.html) and [this link](https://blog.csdn.net/weixin_45456738/article/details/141029610?ops_request_misc=&request_id=&biz_id=102&utm_term=%E5%AE%89%E8%A3%85torch&utm_medium=distribute.pc_search_result.none-task-blog-2~all~sobaiduweb~default-2-141029610.nonecase&spm=1018.2226.3001.4187)
 
 </details>
