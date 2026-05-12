@@ -120,6 +120,25 @@ def reset_device_info_printed() -> None:
     _DEVICE_INFO_PRINTED = False
 
 
+def seed_all(seed: int) -> None:
+    """对当前 accelerator 的全部设备播种。
+
+    包装 torch.cuda.manual_seed[_all]——ROCm 别名同名 API，所以两套栈通用。
+    无 GPU 时是 no-op，避免在 CPU-only 环境下触发 lazy init。调用方仍需自行
+    处理 random/numpy/torch.manual_seed。
+    """
+    if not torch.cuda.is_available():
+        return
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
+def empty_cache() -> None:
+    """释放当前 accelerator 的缓存显存。无 GPU 时是 no-op。"""
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 # =========================================================================
 # Layer 2 — per-trainer state (DeviceCtx)
 # =========================================================================

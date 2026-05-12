@@ -11,7 +11,7 @@ import streamlit as st
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from trainer.device_utils import default_device_str
+from trainer.device_utils import default_device_str, seed_all
 
 st.set_page_config(page_title="MiniMind", initial_sidebar_state="collapsed")
 
@@ -307,8 +307,7 @@ def setup_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 

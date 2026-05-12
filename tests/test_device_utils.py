@@ -9,10 +9,12 @@ from trainer.device_utils import (
     DeviceCtx,
     default_device_str,
     dist_backend,
+    empty_cache,
     is_cuda_native,
     is_rocm,
     print_device_info,
     reset_device_info_printed,
+    seed_all,
     set_current_device,
     vendor_name,
 )
@@ -282,3 +284,27 @@ def test_vendor_detected_as_rocm_when_hip_present(monkeypatch):
         pytest.skip("can't validate vendor without a GPU device visible")
     d = DeviceCtx.from_arg("cuda:0")
     assert d.vendor == "rocm"
+
+
+# ---------- seed_all / empty_cache ----------
+
+def test_seed_all_is_callable_and_returns_none():
+    """seed_all must be a no-op on CPU and not raise on GPU."""
+    assert seed_all(42) is None
+
+
+def test_empty_cache_is_callable_and_returns_none():
+    """empty_cache must be a no-op on CPU and not raise on GPU."""
+    assert empty_cache() is None
+
+
+def test_seed_all_actually_seeds_when_gpu_available():
+    """When a GPU is present, seed_all should make subsequent CUDA RNG draws
+    deterministic across two seedings."""
+    if not torch.cuda.is_available():
+        pytest.skip("no GPU to seed")
+    seed_all(123)
+    a = torch.randint(0, 1 << 30, (4,), device="cuda")
+    seed_all(123)
+    b = torch.randint(0, 1 << 30, (4,), device="cuda")
+    assert torch.equal(a, b)
