@@ -10,3 +10,4 @@ minimind-3/
 checkpoints/
 dataset/*.jsonl
 .claude/
+docs/superpowers/
