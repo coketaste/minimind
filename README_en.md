@@ -251,7 +251,7 @@ MiniMind centralizes GPU detection in `trainer/device_utils.py` so a single code
   ```
   On AMD you should see something like:
   ```
-  [device] AMD ROCm: cuda:0 (AMD Instinct MI300X, 192.0 GiB), ROCm/HIP 7.1.xxxxx, bf16=True, dist_backend=nccl
+  [device] AMD ROCm: cuda:0 (AMD Instinct MI-series, 192.0 GiB), ROCm/HIP 7.1.xxxxx, bf16=True, dist_backend=nccl
   ```
   On NVIDIA the banner reads `[device] NVIDIA CUDA: cuda:0 (...), CUDA 12.x, ...`.
 - The repo also ships a small unit-test suite that exercises every device-detection branch — handy as an environment health check:
