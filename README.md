@@ -252,7 +252,7 @@ MiniMind 的 GPU 处理通过 `trainer/device_utils.py` 自动检测厂商，CUD
   ```
   ROCm 上正常输出形如：
   ```
-  [device] AMD ROCm: cuda:0 (AMD Instinct MI-series, 192.0 GiB), ROCm/HIP 7.1.xxxxx, bf16=True, dist_backend=nccl
+  [device] AMD ROCm: cuda:0 (AMD Radeon RX 7900 XTX, 24.0 GiB), ROCm/HIP 7.1.xxxxx, bf16=True, dist_backend=nccl
   ```
   NVIDIA 上则会打印 `[device] NVIDIA CUDA: cuda:0 (...), CUDA 12.x, ...`。
 - 单元测试覆盖了设备检测的关键分支，可作为环境健康检查：
