@@ -1,0 +1,53 @@
+\section{Limitations}
+\label{sec:limitations}
+
+\paragraph{Single-node scope.}
+All experiments run on a single 8-GPU node.  Multi-node training introduces
+InfiniBand or RoCE interconnects, where NCCL and RCCL may diverge significantly
+in all-reduce latency and in the choice of collective algorithms (tree vs.\
+ring vs.\ NVLS).  Our conclusions about communication overhead apply only to
+the intra-node (NVLink / Infinity Fabric) regime.
+
+\paragraph{Small model scale.}
+MiniMind is a 64M-parameter dense / 198M-A64M MoE model.  At this scale,
+the model fits comfortably within a single GPU's HBM, and DDP all-reduce
+represents a small fraction of step time.  Larger models (7B+) would expose
+memory-bandwidth bottlenecks, activation-checkpoint tradeoffs, and
+collective-communication overheads that are not visible here.  MFU numbers
+at small scale tend to be lower than at large scale (arithmetic intensity is
+suboptimal), so our absolute MFU values should not be extrapolated directly
+to production-scale training.
+
+\paragraph{One model family.}
+MiniMind's architecture is a Llama-family model (RMSNorm, RoPE, GQA, SwiGLU).
+Different architectural choices — state-space models (Mamba), linear attention
+variants, or convolutional hybrids — may exhibit different vendor-portability
+profiles, particularly for operations not covered by \texttt{F.scaled\_dot\_product\_attention}.
+
+\paragraph{Specific software pins.}
+All measurements use PyTorch~2.10, CUDA~12.x, and ROCm~7.1 (see
+Appendix~\ref{sec:appendix} for exact pins).  Both stacks evolve rapidly;
+the ROCm performance gap on SDPA and \texttt{torch.compile} warm-up is
+expected to narrow with each PyTorch release.  Results should be revalidated
+when upgrading software.
+
+\paragraph{Dataset scale.}
+We use the ``mini'' dataset variants shipped with the MiniMind repository
+(\texttt{pretrain\_t2t\_mini}, \texttt{sft\_t2t\_mini}).  These are
+designed for rapid iteration, not state-of-the-art model quality.  Loss
+and perplexity values reported here reflect training on small corpora and
+should not be compared to results trained on web-scale data.
+
+\paragraph{Inference engine version skew.}
+The ROCm builds of vLLM and SGLang may not be at the same commit as the
+CUDA-primary builds.  Where version skew exists, it is documented in
+Table~\ref{tab:software_versions} in the appendix; performance differences
+attributable to feature gaps (rather than hardware) are flagged in the
+relevant tables.
+
+\paragraph{No reward-model quality evaluation.}
+Blocks C and D (PPO, GRPO, agent RL) use a fixed InternLM2-1.8B reward
+model checkpoint.  We measure throughput and the reward signal as seen by
+the policy, but do not evaluate downstream model quality (e.g.\ human
+preference win rate) on either platform.  The reward model itself is not
+trained in this study; its outputs are treated as a black box.

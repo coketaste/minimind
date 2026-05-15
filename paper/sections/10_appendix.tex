@@ -1,0 +1,366 @@
+\appendix
+
+\section{Reproducibility Appendix}
+\label{sec:appendix}
+
+\subsection{Software Version Matrix}
+\label{sec:appendix:versions}
+
+\begin{table}[h]
+\centering
+\caption{Pinned software versions for all experiments.  ROCm and CUDA wheels
+are not interchangeable; the \texttt{torch} version strings differ only in the
+\texttt{+cu12x} / \texttt{+rocm7.1} suffix.}
+\label{tab:software_versions}
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{Component} & \textbf{NVIDIA (H100)} & \textbf{AMD (MI350)} \\
+\midrule
+OS                 & Ubuntu 22.04           & Ubuntu 22.04 \\
+Kernel             & \PH{}                  & \PH{} \\
+Driver             & \PH{} (CUDA 12.x)      & ROCm \PH{} \\
+\texttt{torch}     & \texttt{2.10.0+cu12x}  & \texttt{2.10.0+rocm7.1} \\
+\texttt{torchvision} & \PH{}                & \PH{} \\
+\texttt{transformers} & \PH{}               & \PH{} \\
+\texttt{tokenizers} & \PH{}                 & \PH{} \\
+\texttt{vllm}      & \PH{} (commit \PH{})   & \PH{} (commit \PH{}) \\
+\texttt{sglang}    & \PH{} (commit \PH{})   & \PH{} (commit \PH{}) \\
+\texttt{aiohttp}   & \PH{}                  & \PH{} \\
+\texttt{swanlab}   & \PH{}                  & \PH{} \\
+\texttt{triton}    & \PH{}                  & \PH{} (ROCm Triton) \\
+MiniMind commit    & \PH{}                  & same \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Environment Setup}
+\label{sec:appendix:setup}
+
+\paragraph{NVIDIA (H100).}
+
+\begin{verbatim}
+# Install PyTorch 2.10 CUDA 12.x wheel
+pip install torch==2.10.0+cu12x torchvision \
+    --index-url https://download.pytorch.org/whl/cu12x
+
+# Install remaining dependencies
+pip install transformers tokenizers aiohttp swanlab \
+            fastapi uvicorn requests
+
+# Install inference engines (CUDA)
+pip install vllm==<PIN>
+pip install sglang[all]==<PIN>
+\end{verbatim}
+
+\paragraph{AMD (MI350).}
+
+\begin{verbatim}
+# ROCm 7.1 must be pre-installed via AMD's repo
+# Verify: rocm-smi --version
+
+# Install PyTorch 2.10 ROCm wheel
+pip install torch==2.10.0+rocm7.1 torchvision \
+    --index-url https://download.pytorch.org/whl/rocm7.1
+
+# Same Python dependencies
+pip install transformers tokenizers aiohttp swanlab \
+            fastapi uvicorn requests
+
+# Install inference engines (ROCm)
+# vLLM ROCm: build from source or use AMD-provided wheel
+pip install vllm==<PIN_ROCM>
+pip install sglang[all]==<PIN_ROCM>
+
+# Optional: override GFX version for RDNA3 dev machines
+# (not needed on MI350 gfx942)
+# export HSA_OVERRIDE_GFX_VERSION=11.0.0
+\end{verbatim}
+
+\subsection{Dataset Preparation}
+\label{sec:appendix:datasets}
+
+All datasets are gitignored and must be downloaded separately.  Checksums
+below allow verification that the correct files are in place before running
+any experiment block.
+
+\begin{table}[h]
+\centering
+\caption{Dataset files, sizes, and SHA-256 hashes (first 8 hex digits).}
+\label{tab:datasets}
+\small
+\begin{tabular}{llrr}
+\toprule
+\textbf{File} & \textbf{Stage} & \textbf{Size} & \textbf{SHA-256 (first 8)} \\
+\midrule
+\texttt{dataset/pretrain\_t2t\_mini.jsonl} & Pretrain  & \PH{} & \PH{} \\
+\texttt{dataset/sft\_t2t\_mini.jsonl}      & SFT       & \PH{} & \PH{} \\
+\texttt{dataset/dpo.jsonl}                 & DPO       & \PH{} & \PH{} \\
+\texttt{dataset/lora\_medical.jsonl}       & LoRA      & \PH{} & \PH{} \\
+\texttt{dataset/rlaif.jsonl}               & PPO/GRPO  & \PH{} & \PH{} \\
+\texttt{dataset/agent\_rl.jsonl}           & Agent RL  & \PH{} & \PH{} \\
+\texttt{out/internlm2-1\_8b-reward/}       & PPO/GRPO reward & \PH{} & \PH{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Canonical Run Commands}
+\label{sec:appendix:commands}
+
+All trainer commands are run from the \texttt{trainer/} directory.  All
+evaluation and conversion commands are run from the repo root (or the
+\texttt{scripts/} directory as noted).
+
+\subsubsection{Block A: Pretrain}
+
+\begin{verbatim}
+# Dense, 1 GPU, bf16, no compile
+torchrun --nproc_per_node=1 train_pretrain.py \
+    --data_path ../dataset/pretrain_t2t_mini.jsonl \
+    --hidden_size 768 --num_hidden_layers 8 \
+    --epochs 2 --batch_size 32 --dtype bfloat16 \
+    --use_compile 0 --use_wandb 0 \
+    --save_weight pretrain 2>&1 | tee ../paper/logs/block_a/<VENDOR>_dense_bf16_g1_nocompile.log
+
+# Dense, 8 GPUs, bf16, compile
+torchrun --nproc_per_node=8 train_pretrain.py \
+    --data_path ../dataset/pretrain_t2t_mini.jsonl \
+    --hidden_size 768 --num_hidden_layers 8 \
+    --epochs 2 --batch_size 32 --dtype bfloat16 \
+    --use_compile 1 --use_wandb 0 \
+    --save_weight pretrain 2>&1 | tee ../paper/logs/block_a/<VENDOR>_dense_bf16_g8_compile.log
+
+# MoE, 8 GPUs, bf16
+torchrun --nproc_per_node=8 train_pretrain.py \
+    --data_path ../dataset/pretrain_t2t_mini.jsonl \
+    --hidden_size 768 --num_hidden_layers 8 \
+    --use_moe 1 --epochs 2 --batch_size 32 \
+    --dtype bfloat16 --use_compile 0 --use_wandb 0 \
+    --save_weight pretrain_moe 2>&1 | tee ../paper/logs/block_a/<VENDOR>_moe_bf16_g8.log
+\end{verbatim}
+
+\subsubsection{Block B: Post-training}
+
+\begin{verbatim}
+# SFT, 8 GPUs
+torchrun --nproc_per_node=8 train_full_sft.py \
+    --from_weight pretrain \
+    --data_path ../dataset/sft_t2t_mini.jsonl \
+    --hidden_size 768 --num_hidden_layers 8 \
+    --epochs 1 --batch_size 16 --dtype bfloat16 \
+    --save_weight full_sft 2>&1 | tee ../paper/logs/block_b/<VENDOR>_sft_g8.log
+
+# LoRA, 1 GPU
+torchrun --nproc_per_node=1 train_lora.py \
+    --from_weight full_sft \
+    --data_path ../dataset/lora_medical.jsonl \
+    --hidden_size 768 --lora_name lora_medical \
+    --dtype bfloat16 2>&1 | tee ../paper/logs/block_b/<VENDOR>_lora_g1.log
+
+# Distillation: MoE teacher -> dense student
+torchrun --nproc_per_node=8 train_distillation.py \
+    --teacher_weight pretrain_moe --student_weight full_sft \
+    --hidden_size 768 --use_moe 1 --dtype bfloat16 \
+    --alpha 0.5 --temperature 1.5 \
+    2>&1 | tee ../paper/logs/block_b/<VENDOR>_distill_g8.log
+\end{verbatim}
+
+\subsubsection{Block C: Preference Alignment}
+
+\begin{verbatim}
+# DPO
+torchrun --nproc_per_node=1 train_dpo.py \
+    --from_weight full_sft \
+    --data_path ../dataset/dpo.jsonl \
+    --hidden_size 768 --dtype bfloat16 \
+    --beta 0.15 --learning_rate 4e-8 \
+    2>&1 | tee ../paper/logs/block_c/<VENDOR>_dpo_g1.log
+
+# GRPO, torch rollout engine, num_generations=4
+torchrun --nproc_per_node=8 train_grpo.py \
+    --from_weight full_sft \
+    --data_path ../dataset/rlaif.jsonl \
+    --hidden_size 768 --dtype bfloat16 \
+    --num_generations 4 --rollout_engine torch \
+    --reward_model_path ../out/internlm2-1_8b-reward \
+    2>&1 | tee ../paper/logs/block_c/<VENDOR>_grpo_torch_g4.log
+
+# PPO, sglang rollout engine
+torchrun --nproc_per_node=8 train_ppo.py \
+    --from_weight full_sft \
+    --data_path ../dataset/rlaif.jsonl \
+    --hidden_size 768 --dtype bfloat16 \
+    --rollout_engine sglang \
+    --reward_model_path ../out/internlm2-1_8b-reward \
+    2>&1 | tee ../paper/logs/block_c/<VENDOR>_ppo_sglang_g8.log
+\end{verbatim}
+
+\subsubsection{Block D: Agent RL}
+
+\begin{verbatim}
+torchrun --nproc_per_node=8 train_agent.py \
+    --from_weight full_sft \
+    --data_path ../dataset/agent_rl.jsonl \
+    --hidden_size 768 --dtype bfloat16 \
+    --reward_model_path ../out/internlm2-1_8b-reward \
+    2>&1 | tee ../paper/logs/block_d/<VENDOR>_agent_g8.log
+\end{verbatim}
+
+\subsubsection{Block E: Inference}
+
+\begin{verbatim}
+# Convert to Qwen3 HF format (run from repo root)
+python scripts/convert_model.py \
+    --weight full_sft --hidden_size 768 \
+    --out_path out/qwen3_converted/full_sft_blockb_dense_g8
+
+# HF-native single-stream benchmark
+python eval_llm.py --weight full_sft --hidden_size 768 \
+    --show_speed 1 --max_new_tokens 512
+
+# Concurrent benchmark via OpenAI-compatible server
+cd scripts && python serve_openai_api.py \
+    --weight full_sft --hidden_size 768 --port 8998 &
+sleep 5
+python ../paper/experiments/bench_client.py \
+    --port 8998 --concurrency 32 --num_requests 200 --max_tokens 512
+
+# vLLM serve (Qwen3-converted weights)
+python -m vllm.entrypoints.openai.api_server \
+    --model out/qwen3_converted/full_sft_blockb_dense_g8 \
+    --port 8999 --tensor-parallel-size 1 &
+sleep 10
+python paper/experiments/bench_client.py \
+    --port 8999 --concurrency 32 --num_requests 200 --max_tokens 512
+
+# Verification: greedy parity (Gate 6)
+python paper/experiments/verify_greedy_parity.py \
+    --native_weight full_sft_blockb_dense_g8 \
+    --conv_path out/qwen3_converted/full_sft_blockb_dense_g8 \
+    --server_url http://127.0.0.1:8999 --num_prompts 20
+
+# Tool-call eval
+python scripts/eval_toolcall.py \
+    --weight full_sft --hidden_size 768
+\end{verbatim}
+
+\subsection{Verification Harness}
+\label{sec:appendix:verify}
+
+Before reporting any results, run the 6-gate verification harness:
+
+\begin{verbatim}
+# For CUDA / H100
+bash paper/experiments/verify_all.sh cuda
+
+# For ROCm / MI350
+bash paper/experiments/verify_all.sh rocm
+\end{verbatim}
+
+Expected terminal output on a clean run:
+
+\begin{verbatim}
+[PASS] Gate 1: All banners valid
+[PASS] Gate 2: Convergence parity within 2%
+[PASS] Gate 3: MoE aux_loss values are sane
+[PASS] Gate 4: Checkpoint round-trip passed
+[PASS] Gate 5: All pytest tests passed
+[PASS] Gate 6: Greedy parity passed
+==================================
+Verification summary for <vendor>
+  PASSED: 6
+  FAILED: 0
+==================================
+All gates passed. Proceed with experiments.
+\end{verbatim}
+
+\subsection{Expected Device Banner}
+\label{sec:appendix:banner}
+
+Every training run emits a device banner at initialization via
+\texttt{print\_device\_info()} (\texttt{trainer/device\_utils.py}).
+The banner format is:
+
+\begin{verbatim}
+[device] NVIDIA H100 SXM5 80GB | CUDA 12.x | torch 2.10.0+cu12x
+         rank=0/8 | bf16=True | dist_backend=nccl
+         mem_total=81920 MiB
+\end{verbatim}
+
+For AMD:
+
+\begin{verbatim}
+[device] AMD Instinct MI350 | ROCm 7.1 | torch 2.10.0+rocm7.1
+         rank=0/8 | bf16=True | dist_backend=nccl
+         mem_total=<PH> MiB
+\end{verbatim}
+
+Gate~1 of the verification harness greps all Block~A logs for the
+\texttt{[device]}, \texttt{bf16=True}, and \texttt{dist\_backend=nccl}
+strings to confirm that each log corresponds to the intended platform.
+
+\subsection{MFU Calculation Details}
+\label{sec:appendix:mfu}
+
+Model FLOPs Utilization is computed as:
+\[
+  \text{MFU} = \frac{6 \times P \times T_{\text{step}} / t_{\text{step}}}%
+                    {F_{\text{peak}}}
+\]
+where $P$ is the number of active parameters (equal to total parameters for
+dense models; equal to $P_{\text{active}}$ for MoE), $T_{\text{step}}$ is
+the number of tokens per step (batch size $\times$ sequence length $\times$
+number of GPUs), $t_{\text{step}}$ is the wall-clock step time in seconds,
+and $F_{\text{peak}}$ is the vendor-advertised peak throughput in FLOPs/s
+(H100: 989\,TFLOPs/s bf16; MI350: \PH{}\,TFLOPs/s bf16).
+
+For the dense MiniMind-768 model:
+$P_{\text{dense}} \approx 64.7\times10^6$ parameters.
+
+For the MoE MiniMind-768 model with 4 experts, 1 active, and 1 shared:
+$P_{\text{active}} = P_{\text{base}} + P_{\text{shared}} + P_{\text{1 routed expert}}
+\approx \PH{}\times10^6$ parameters.
+
+The \texttt{paper/experiments/compute\_mfu.py} script automates this
+calculation from training logs and \texttt{MiniMindConfig} parameters.
+
+\subsection{Metric Collection}
+\label{sec:appendix:metrics}
+
+After all experiment logs are collected:
+
+\begin{verbatim}
+# Parse all logs, compute MFU, aggregate metrics
+python paper/experiments/collect_metrics.py \
+    --log_dir paper/logs \
+    --out_dir paper/tables
+
+# Outputs:
+#   paper/tables/metrics.json  — full structured results
+#   paper/tables/metrics.csv   — flat CSV for spreadsheet import
+\end{verbatim}
+
+The JSON schema is:
+
+\begin{verbatim}
+{
+  "block_a": {
+    "<vendor>_<tag>": {
+      "tokens_per_s": float,
+      "mfu_pct": float,
+      "peak_mem_gb": float,
+      "epoch_min": float,
+      "final_loss": float
+    }, ...
+  },
+  "block_e": {
+    "<vendor>_<engine>_<concurrency>": {
+      "ttft_p50_ms": float,
+      "ttft_p95_ms": float,
+      "itl_p50_ms": float,
+      "tokens_per_s": float,
+      "requests_per_s": float
+    }, ...
+  }
+}
+\end{verbatim}

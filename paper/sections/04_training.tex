@@ -1,0 +1,186 @@
+\section{Training-Stage Results}
+\label{sec:training}
+
+\subsection{Block A: Pretraining}
+\label{sec:training:pretrain}
+
+Table~\ref{tab:pretrain_dense} reports pretraining throughput and MFU for the
+dense configuration across GPU counts and vendors.
+Table~\ref{tab:pretrain_moe} gives the corresponding MoE results.
+
+\begin{table}[h]
+\centering
+\caption{Dense pretrain (hidden\_size=768, 8 layers, bf16, 2 epochs, pretrain\_t2t\_mini).
+MFU computed against H100 989\,TFLOPs/s (NVIDIA) and MI350 \PH{X}\,TFLOPs/s (AMD).}
+\label{tab:pretrain_dense}
+\small
+\begin{tabular}{lllrrrrr}
+\toprule
+\textbf{Vendor} & \textbf{GPUs} & \textbf{dtype / compile} &
+\textbf{tok/s} & \textbf{MFU (\%)} & \textbf{Peak HBM (GB)} &
+\textbf{Epoch (min)} & \textbf{Final loss} \\
+\midrule
+H100  & 1 & bf16 / off & \PH{} & \PH{} & \PH{} & \PH{} & \PH{} \\
+H100  & 4 & bf16 / off & \PH{} & \PH{} & \PH{} & \PH{} & \PH{} \\
+H100  & 8 & bf16 / off & \PH{} & \PH{} & \PH{} & \PH{} & \PH{} \\
+H100  & 8 & bf16 / on  & \PH{} & \PH{} & \PH{} & \PH{} & \PH{} \\
+H100  & 8 & fp16 / off & \PH{} & \PH{} & \PH{} & \PH{} & \PH{} \\
+\midrule
+MI350 & 1 & bf16 / off & \PH{} & \PH{} & \PH{} & \PH{} & \PH{} \\
+MI350 & 4 & bf16 / off & \PH{} & \PH{} & \PH{} & \PH{} & \PH{} \\
+MI350 & 8 & bf16 / off & \PH{} & \PH{} & \PH{} & \PH{} & \PH{} \\
+MI350 & 8 & bf16 / on  & \PH{} & \PH{} & \PH{} & \PH{} & \PH{} \\
+MI350 & 8 & fp16 / off & \PH{} & \PH{} & \PH{} & \PH{} & \PH{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{MoE pretrain (4 experts, 1 active, hidden\_size=768, bf16). MFU uses $P_{\text{active}}$.}
+\label{tab:pretrain_moe}
+\small
+\begin{tabular}{llrrrrr}
+\toprule
+\textbf{Vendor} & \textbf{GPUs} &
+\textbf{tok/s} & \textbf{MFU (\%)} & \textbf{Peak HBM (GB)} &
+\textbf{Epoch (min)} & \textbf{Final loss + aux} \\
+\midrule
+H100  & 1 & \PH{} & \PH{} & \PH{} & \PH{} & \PH{} \\
+H100  & 4 & \PH{} & \PH{} & \PH{} & \PH{} & \PH{} \\
+H100  & 8 & \PH{} & \PH{} & \PH{} & \PH{} & \PH{} \\
+\midrule
+MI350 & 1 & \PH{} & \PH{} & \PH{} & \PH{} & \PH{} \\
+MI350 & 4 & \PH{} & \PH{} & \PH{} & \PH{} & \PH{} \\
+MI350 & 8 & \PH{} & \PH{} & \PH{} & \PH{} & \PH{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Multi-GPU scaling.}
+Figure~\ref{fig:scaling} (placeholder) shows strong-scaling efficiency
+(normalized throughput per GPU vs.\ ideal linear) for both platforms.
+We expect near-linear scaling within 8 GPUs for a 64\,M-parameter model
+whose activation size is small relative to intra-node interconnect bandwidth.
+
+\paragraph{\texttt{torch.compile} effect.}
+\PH{Discuss compile speedup on H100 vs MI350 once data are available.}
+
+\subsection{Block B: Supervised Fine-Tuning, LoRA, and Distillation}
+\label{sec:training:posttrain}
+
+\begin{table}[h]
+\centering
+\caption{Post-training stages: throughput and memory. SFT uses seq\_len=768,
+LoRA trains only adapter parameters ($\ll 1\%$ of total), Distillation
+runs MoE teacher + dense student simultaneously.}
+\label{tab:posttrain}
+\small
+\begin{tabular}{lllrrr}
+\toprule
+\textbf{Stage} & \textbf{Vendor} & \textbf{GPUs} &
+\textbf{tok/s} & \textbf{Peak HBM (GB)} & \textbf{Final loss} \\
+\midrule
+SFT         & H100  & 1 & \PH{} & \PH{} & \PH{} \\
+SFT         & H100  & 8 & \PH{} & \PH{} & \PH{} \\
+SFT         & MI350 & 1 & \PH{} & \PH{} & \PH{} \\
+SFT         & MI350 & 8 & \PH{} & \PH{} & \PH{} \\
+\midrule
+LoRA        & H100  & 1 & \PH{} & \PH{} & \PH{} \\
+LoRA        & H100  & 8 & \PH{} & \PH{} & \PH{} \\
+LoRA        & MI350 & 1 & \PH{} & \PH{} & \PH{} \\
+LoRA        & MI350 & 8 & \PH{} & \PH{} & \PH{} \\
+\midrule
+Distill (MoE$\to$dense) & H100  & 8 & \PH{} & \PH{} & \PH{} \\
+Distill (MoE$\to$dense) & MI350 & 8 & \PH{} & \PH{} & \PH{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{LoRA efficiency.}
+Because \texttt{torch.compile} is automatically disabled for LoRA (the
+monkey-patched forward is incompatible; see \texttt{train\_lora.py:165}),
+the throughput gap vs.\ full SFT is entirely a function of trainable-parameter
+ratio, not kernel compilation.
+
+\paragraph{Distillation with a MoE teacher.}
+The distillation step exercises MoE forward passes in the teacher alongside
+dense backward passes in the student on every step, stressing memory bandwidth
+differently from pure-MoE or pure-dense training.
+\PH{Discuss observed memory and throughput differences between vendors.}
+
+\subsection{Block C: Preference Alignment (DPO, PPO, GRPO)}
+\label{sec:training:rlhf}
+
+\begin{table}[h]
+\centering
+\caption{DPO results. The frozen reference doubles activation memory;
+ batch size is limited to 4 per GPU.}
+\label{tab:dpo}
+\small
+\begin{tabular}{llrrrr}
+\toprule
+\textbf{Vendor} & \textbf{GPUs} &
+\textbf{tok/s} & \textbf{Peak HBM (GB)} &
+\textbf{DPO loss} & \textbf{Epoch (min)} \\
+\midrule
+H100  & 1 & \PH{} & \PH{} & \PH{} & \PH{} \\
+H100  & 8 & \PH{} & \PH{} & \PH{} & \PH{} \\
+MI350 & 1 & \PH{} & \PH{} & \PH{} & \PH{} \\
+MI350 & 8 & \PH{} & \PH{} & \PH{} & \PH{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{GRPO and PPO rollout throughput and training metrics.
+Rollout-tok/s is measured inside the training loop via the \texttt{RolloutResult} timer.}
+\label{tab:rlhf}
+\small
+\begin{tabular}{lllrrrrr}
+\toprule
+\textbf{Algo} & \textbf{Vendor} & \textbf{Engine} &
+\textbf{$G$} & \textbf{rollout-tok/s} & \textbf{train-tok/s} &
+\textbf{Peak HBM (GB)} & \textbf{Reward} \\
+\midrule
+GRPO & H100  & torch  & 4 & \PH{} & \PH{} & \PH{} & \PH{} \\
+GRPO & H100  & torch  & 8 & \PH{} & \PH{} & \PH{} & \PH{} \\
+GRPO & H100  & sglang & 4 & \PH{} & \PH{} & \PH{} & \PH{} \\
+GRPO & MI350 & torch  & 4 & \PH{} & \PH{} & \PH{} & \PH{} \\
+GRPO & MI350 & torch  & 8 & \PH{} & \PH{} & \PH{} & \PH{} \\
+GRPO & MI350 & sglang & 4 & \PH{} & \PH{} & \PH{} & \PH{} \\
+\midrule
+PPO  & H100  & torch  & -- & \PH{} & \PH{} & \PH{} & \PH{} \\
+PPO  & H100  & sglang & -- & \PH{} & \PH{} & \PH{} & \PH{} \\
+PPO  & MI350 & torch  & -- & \PH{} & \PH{} & \PH{} & \PH{} \\
+PPO  & MI350 & sglang & -- & \PH{} & \PH{} & \PH{} & \PH{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Block D: Agent RL}
+\label{sec:training:agent}
+
+Table~\ref{tab:agent} reports trajectory throughput and tool-call success rate.
+Because agent training involves multi-turn rollouts with real tool invocations,
+the rollout step is significantly more variable than in GRPO/PPO.
+
+\begin{table}[h]
+\centering
+\caption{Agent RL: trajectory throughput and tool-call success.}
+\label{tab:agent}
+\small
+\begin{tabular}{llrrrr}
+\toprule
+\textbf{Vendor} & \textbf{GPUs} &
+\textbf{traj/h} & \textbf{tool-call success (\%)} &
+\textbf{Peak HBM (GB)} & \textbf{Reward curve} \\
+\midrule
+H100  & 1 & \PH{} & \PH{} & \PH{} & \PH{} \\
+H100  & 8 & \PH{} & \PH{} & \PH{} & \PH{} \\
+MI350 & 1 & \PH{} & \PH{} & \PH{} & \PH{} \\
+MI350 & 8 & \PH{} & \PH{} & \PH{} & \PH{} \\
+\bottomrule
+\end{tabular}
+\end{table}

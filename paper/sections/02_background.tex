@@ -1,0 +1,164 @@
+\section{Background}
+\label{sec:background}
+
+\subsection{The MiniMind Architecture}
+\label{sec:background:arch}
+
+MiniMind implements a Llama-family~\citep{touvron2023llama} transformer decoder
+with the following design choices, matching the Qwen3~\citep{qwen3} model family:
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{RMSNorm} pre-normalization with $\epsilon = 10^{-6}$.
+  \item \textbf{Grouped-query attention (GQA)}~\citep{ainslie2023gqa}: 8 query
+    heads, 4 key-value heads, per-head RMSNorm on $Q$ and $K$.
+  \item \textbf{Rotary position embeddings (RoPE)}~\citep{su2024roformer} with
+    $\theta = 10^6$.  Inference-time YaRN~\citep{peng2023yarn} scaling (4$\times$
+    extension) is available via \texttt{--inference\_rope\_scaling}.
+  \item \textbf{SwiGLU} feed-forward network; intermediate size derived as
+    $\lceil h \cdot \pi / 64 \rceil \times 64$ where $h$ is \texttt{hidden\_size}.
+  \item \textbf{Flash attention}: \texttt{F.scaled\_dot\_product\_attention}
+    (PyTorch SDPA), which dispatches to cuDNN-FlashAttention on CUDA and to
+    hipBLASLt-fused kernels on ROCm.  Falls back to manual attention when
+    \texttt{seq\_len=1} (decode step) or when a padding mask is present.
+  \item \textbf{Tied embeddings} (\texttt{tie\_word\_embeddings=True});
+    vocabulary size 6400, trained from a custom BPE tokenizer.
+\end{itemize}
+
+\paragraph{Dense configuration.}
+Default: \texttt{hidden\_size=768}, \texttt{num\_hidden\_layers=8},
+\texttt{num\_attention\_heads=8}, \texttt{num\_key\_value\_heads=4}.
+Total parameters: $\approx$64\,M.
+
+\paragraph{MoE configuration.}
+A sparse mixture-of-experts~\citep{shazeer2017outrageously} variant replaces
+the dense FFN with a gated MoE layer: 4 routed experts, 1 active per token, plus
+a shared expert, governed by
+\texttt{router\_aux\_loss\_coef}$= 5 \times 10^{-4}$.  Total parameters:
+$\approx$198\,M; active per forward: $\approx$64\,M.  The loss function always
+computes \texttt{loss = res.loss + res.aux\_loss} so the router
+load-balancing term is included during both dense and MoE training
+(it is identically zero for dense models).
+
+\paragraph{Tokenizer.}
+A BPE tokenizer with vocabulary size 6400, trained on the project's text corpus.
+Special tokens include \texttt{<think>}, \texttt{</think>},
+\texttt{<tool\_call>}, \texttt{<tool\_response>}, enabling chain-of-thought and
+tool-use workflows directly in the chat template.
+
+\subsection{Algorithm Landscape}
+\label{sec:background:algos}
+
+MiniMind covers the following training stages, each implemented as a self-contained
+script in \texttt{trainer/}:
+
+\paragraph{Pretraining.}
+Standard causal language modeling loss over next-token prediction.  The trainer
+(\texttt{train\_pretrain.py}) supports DDP via \texttt{torchrun}, bf16/fp16 mixed
+precision via \texttt{torch.amp}, cosine learning-rate schedule, gradient
+clipping, and optional \texttt{torch.compile}.
+
+\paragraph{Supervised Fine-Tuning (SFT).}
+\texttt{train\_full\_sft.py} uses \texttt{tokenizer.apply\_chat\_template} to
+format instruction-response pairs and masks all non-assistant tokens
+(labels $= -100$), so the loss is computed only on assistant completions.
+
+\paragraph{LoRA.}
+\texttt{train\_lora.py} injects low-rank adapters via a custom
+\texttt{apply\_lora} function in \texttt{model/model\_lora.py} (no \texttt{peft}
+dependency).  Only LoRA parameters are trained; all base-model weights are
+frozen.  The adapter is saved as a separate \texttt{.pth} keyed by layer name.
+\texttt{torch.compile} is automatically disabled for LoRA (monkey-patch forward
+incompatibility is caught and logged).
+
+\paragraph{Knowledge Distillation.}
+\texttt{train\_distillation.py} minimizes a weighted sum of cross-entropy (CE)
+loss against ground-truth labels and Kullback-Leibler (KL) divergence against
+a frozen teacher's logits:
+\[
+  \mathcal{L} = \alpha \mathcal{L}_{\text{CE}} + (1 - \alpha)
+    \cdot T^2 \cdot D_{\text{KL}}(p_{\text{teacher}} \,\|\, p_{\text{student}})
+\]
+where $T$ is the temperature and $\alpha \in [0,1]$ controls the CE weight.
+The default configuration distills from a MoE teacher into a dense student.
+
+\paragraph{Direct Preference Optimization (DPO).}
+\texttt{train\_dpo.py} implements DPO~\citep{rafailov2023direct} with a frozen
+reference model.  The loss is:
+\[
+  \mathcal{L}_{\text{DPO}} = -\mathbb{E}_{(x, y_w, y_l)} \left[
+    \log \sigma \!\left( \beta \left(
+      \log \frac{\pi_\theta(y_w|x)}{\pi_{\text{ref}}(y_w|x)} -
+      \log \frac{\pi_\theta(y_l|x)}{\pi_{\text{ref}}(y_l|x)}
+    \right) \right)
+  \right]
+\]
+with $\beta = 0.15$ (default) and a very small learning rate ($4 \times 10^{-8}$)
+to prevent catastrophic forgetting.
+
+\paragraph{Proximal Policy Optimization (PPO).}
+\texttt{train\_ppo.py} maintains four models simultaneously: an actor, a critic
+(value model), a frozen reference, and a separately loaded reward model
+(InternLM2-1.8B-reward by default).  Rollouts are collected by
+\texttt{rollout\_engine.py} (\texttt{--rollout\_engine torch} or
+\texttt{--rollout\_engine sglang}).  The actor is updated using clipped
+PPO~\citep{schulman2017proximal} with generalized advantage estimation (GAE),
+early-stopped when per-step KL exceeds a threshold.
+
+\paragraph{Group-Relative Policy Optimization (GRPO).}
+\texttt{train\_grpo.py} implements GRPO~\citep{shao2024deepseekmath}: for each
+prompt, $G$ responses are sampled; rewards are computed by a reward model plus
+heuristic rule terms (response length, \texttt{<think>} format, repetition
+penalty); advantages are normalized within the group.  No critic model is needed.
+The thinking ratio ($\texttt{--thinking\_ratio}$) controls how often the
+\texttt{open\_thinking} chat-template flag is activated.
+
+\paragraph{Agent RL.}
+\texttt{train\_agent.py} extends GRPO to multi-turn agent trajectories involving
+tool calls; the reward function evaluates both the quality of tool invocations and
+the final answer.
+
+\subsection{Hardware and Runtime Stacks}
+\label{sec:background:hardware}
+
+\begin{table}[h]
+\centering
+\caption{Hardware and software stacks under test.}
+\label{tab:hw}
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{Axis} & \textbf{NVIDIA} & \textbf{AMD} \\
+\midrule
+GPU & H100 SXM5 (80\,GB HBM3) & MI350 (HBM3e) \\
+\# GPUs / node & 8 & 8 \\
+Intra-node interconnect & NVLink 4 + NVSwitch & Infinity Fabric \\
+PyTorch wheel & \texttt{2.10.0+cu12x} & \texttt{2.10.0+rocm7.1} \\
+Distributed backend & NCCL & RCCL (aliased as \texttt{"nccl"}) \\
+Compiler stack & CUDA / cuDNN / cuBLAS / Triton & ROCm / MIOpen / hipBLASLt / Triton \\
+Low-precision & bf16, fp16; Transformer Engine FP8 & bf16, fp16; ROCm FP8 \\
+Inference engines & HF native, vLLM (CUDA), SGLang (CUDA) & HF native, vLLM-ROCm, SGLang-ROCm \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{PyTorch portability.}
+PyTorch-ROCm aliases the \texttt{torch.cuda.*} API surface to HIP so that code
+referencing \texttt{device\_type="cuda"}, \texttt{torch.cuda.is\_available()},
+or \texttt{torch.cuda.get\_device\_properties()} works unchanged on AMD GPUs.
+MiniMind's \texttt{device\_utils.py} detects the ROCm build by inspecting
+\texttt{torch.version.hip} and adjusts logging accordingly; the rest of the
+codebase is unaware of the vendor.
+
+\paragraph{SDPA dispatch.}
+\texttt{F.scaled\_dot\_product\_attention} selects its backend at runtime.  On
+CUDA, it may dispatch to cuDNN FlashAttention, FlashAttention-2, or
+FlashAttention-3 depending on the cuDNN version and \texttt{sdp\_kernel} context.
+On ROCm, it dispatches to hipBLASLt-fused attention or Composable Kernel (CK)
+flash attention.  We report which backend was selected for each datapoint via
+\texttt{torch.backends.cuda.flash\_sdp\_enabled()} and its ROCm equivalent.
+
+\paragraph{Collective communication.}
+Under DDP, \texttt{dist.init\_process\_group("nccl")} maps to NCCL on NVIDIA and
+RCCL on AMD.  Both expose the same \texttt{torch.distributed} API.  Intra-node
+bandwidth (all-reduce of the $\approx$64\,M-parameter gradient buffer at bf16)
+is reported in~\S\ref{sec:crosscutting:nccl}.

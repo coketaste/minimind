@@ -1,0 +1,88 @@
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{The Floor of Vendor-Neutral LLM Development}
+\label{sec:discussion:floor}
+
+MiniMind demonstrates that the \emph{algorithmic} layer of LLM development
+is largely vendor-neutral today.  Every training stage — from BPE tokenizer
+through agent RL — runs on both H100 and MI350 without changes to the
+trainer code, using only the portability layer in \texttt{trainer/device\_utils.py}
+(\texttt{DeviceCtx}, \texttt{dist\_backend()}, \texttt{default\_device\_str()}).
+PyTorch-ROCm's aliasing of the \texttt{torch.cuda.*} surface is sufficiently
+mature that the remaining divergences are confined to:
+
+\begin{enumerate}
+\item \textbf{SDPA backend selection.} \texttt{F.scaled\_dot\_product\_attention}
+  dispatches to cuDNN FlashAttention (CUDA) or to hipBLASLt-fused attention /
+  Composable Kernel (ROCm) depending on the runtime.  The same PyTorch API
+  surface is used in both cases; the performance and numerical properties of
+  the underlying kernels differ.
+\item \textbf{\texttt{torch.compile} warm-up time.}  First-run Triton-ROCm
+  kernel compilation is slower than CUDA due to the additional LLVM→HSACO
+  step.  Subsequent runs are cached.
+\item \textbf{FP8 availability.}  NVIDIA exposes FP8 via Transformer Engine
+  with a stable API; AMD's FP8 path via hipBLASLt is available but not yet
+  wrapped in a \texttt{torch.nn.Linear}-compatible interface in stock PyTorch.
+\item \textbf{Inference ecosystem maturity.}  vLLM and SGLang maintain
+  ROCm branches, but the feature gap (e.g.\ speculative decoding, RadixAttention
+  prefix caching) between the CUDA-primary and ROCm paths closes with each
+  release cycle.
+\end{enumerate}
+
+\subsection{Where Divergence Remains}
+\label{sec:discussion:divergence}
+
+\paragraph{Custom kernels.}
+Projects that rely on hand-written CUDA kernels (Flash-Attention~3, DeepSpeed
+Triton extensions, Liger-Kernel) face a porting cost on ROCm.  MiniMind
+deliberately avoids this by relying exclusively on \texttt{F.scaled\_dot\_product\_attention}
+and standard PyTorch operations.  This is a deliberate design choice that
+trades potential peak performance for portability.
+
+\paragraph{MoE token dispatch.}
+Expert routing involves a scatter/gather pattern that benefits from
+vendor-specific fused kernels.  On CUDA, libraries such as Megablocks or
+cuBLAS batched-GEMM with custom dispatch achieve near-zero overhead.
+On ROCm, the same functionality is available via Composable Kernel (CK) and
+hipBLASLt grouped GEMM, but the integration with PyTorch's dispatcher is
+less mature.  For MiniMind's small ($N{=}4$) expert count and 768-dim hidden
+size, the overhead is negligible, but larger MoE models would expose this
+gap more sharply.
+
+\paragraph{Serving ecosystem.}
+vLLM and SGLang are CUDA-first; the ROCm ports exist but lag on features
+such as FP8 KV-cache quantization, speculative decoding, and disaggregated
+prefill-decode.  For production serving, these gaps translate to a real
+efficiency penalty on AMD hardware that is separate from raw compute throughput.
+
+\paragraph{Tooling and profiling.}
+NVIDIA Nsight Systems/Compute provides fine-grained kernel-level profiling
+that is tightly integrated with the CUDA runtime.  AMD's equivalent
+(Omniperf, ROCprofiler-SDK, RocTracer) has reached parity for most common
+workloads but has a steeper learning curve and less community-written tooling.
+
+\subsection{Implications for the Research Community}
+\label{sec:discussion:implications}
+
+Our results provide three concrete takeaways:
+
+\begin{enumerate}
+\item \textbf{Algorithm development can and should be vendor-neutral.}
+  The overhead of maintaining a portable device layer
+  (\texttt{device\_utils.py}: 120 lines) is small relative to the algorithmic
+  work in each trainer.  New algorithm proposals should publish on
+  vendor-neutral code paths to avoid creating AMD-inaccessible baselines.
+
+\item \textbf{The inference gap is the primary remaining concern.}
+  Training throughput parity (where it exists) does not imply serving parity.
+  The vLLM and SGLang ROCm feature gaps mean that AMD hardware may train
+  efficiently but serve at reduced throughput until the inference ecosystem
+  catches up.
+
+\item \textbf{Small models are ideal for cross-vendor evaluation.}
+  MiniMind's 64M parameters fit easily in a single-GPU context, which
+  eliminates FSDP/TP parallelism as a confound.  Researchers validating
+  vendor portability of new algorithms should prototype on small models first
+  before investing in multi-node, mixed-precision, or expert-parallel stacks.
+\end{enumerate}

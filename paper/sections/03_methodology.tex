@@ -1,0 +1,141 @@
+\section{Methodology}
+\label{sec:methodology}
+
+\subsection{Vendor-Portable Code Path}
+\label{sec:methodology:portability}
+
+All trainer scripts use \texttt{trainer/device\_utils.py} as the single point of
+contact for hardware-specific behavior.  The module exposes two layers:
+
+\textbf{Free functions} answer environment-level questions:
+\texttt{is\_rocm()}, \texttt{is\_cuda\_native()}, \texttt{vendor\_name()},
+\texttt{dist\_backend()}, \texttt{default\_device\_str()},
+\texttt{set\_current\_device()}, and \texttt{print\_device\_info()}.
+\texttt{dist\_backend()} returns \texttt{"nccl"} on both CUDA and ROCm because
+PyTorch-ROCm exposes RCCL under that string alias.
+\texttt{print\_device\_info()} logs a one-line banner at startup
+(Figure~\ref{fig:banner}) that is captured for every experiment run.
+
+\textbf{\texttt{DeviceCtx}} (frozen dataclass) encapsulates per-trainer state.
+Each trainer builds it once:
+\begin{lstlisting}[language=Python,basicstyle=\small\ttfamily]
+dev = DeviceCtx.from_arg(args.device)
+if dist.is_initialized():
+    dev = dev.for_rank(local_rank)
+autocast_ctx = dev.autocast(args.dtype)   # nullcontext on CPU
+scaler       = dev.grad_scaler(enabled=(args.dtype == 'float16'))
+\end{lstlisting}
+\texttt{dev.autocast()} dispatches to
+\texttt{torch.amp.autocast(device\_type="cuda", ...)} for both NVIDIA and AMD
+(ROCm aliases \texttt{cuda} in its PyTorch build); it returns
+\texttt{nullcontext()} on CPU so no special-casing is needed.
+
+\textbf{Consequence for this study.}  The only files that differ between a CUDA
+run and a ROCm run are the PyTorch wheel and the \texttt{HSA\_OVERRIDE\_GFX\_VERSION}
+environment variable (required for gfx1100-family targets; not needed for MI350
+gfx940).  Trainer logic, model code, checkpoint format, and dataset loading are
+bit-for-bit identical.
+
+\subsection{Reproducibility Recipe}
+\label{sec:methodology:repro}
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Software pins.}  All experiments use:
+    \texttt{torch==2.10.0+cu12x} (NVIDIA) and
+    \texttt{torch==2.10.0+rocm7.1} (AMD);
+    \texttt{transformers==4.5x} (pinned; see Appendix~\ref{sec:appendix:install});
+    \texttt{vllm} and \texttt{sglang} at the commit SHAs listed in
+    Table~\ref{tab:versions}.
+  \item \textbf{Random seeds.}  Every trainer calls
+    \texttt{setup\_seed(42 + rank)} at startup, which seeds Python
+    \texttt{random}, NumPy, PyTorch, and \texttt{torch.cuda} (CUDA and ROCm
+    use the same API surface).
+  \item \textbf{Data.}  Datasets are downloaded at fixed versions; SHA-256
+    hashes are recorded in Appendix~\ref{sec:appendix:data}.
+  \item \textbf{Banner capture.}  Every run is launched via a wrapper that
+    captures the first \texttt{[device] ...} line from
+    \texttt{print\_device\_info()} and saves it alongside metrics.  This guards
+    against mis-scheduled jobs.
+  \item \textbf{Checkpoint naming.}  MiniMind uses load-bearing checkpoint
+    names of the form
+    \texttt{\{save\_weight\}\_\{hidden\_size\}\{\_moe?\}.pth}.
+    The same naming convention is enforced in all experiment scripts.
+\end{itemize}
+
+\subsection{Model-FLOP Utilization}
+\label{sec:methodology:mfu}
+
+Following~\citet{chowdhery2023palm}, we define Model-FLOP Utilization (MFU) as:
+\[
+  \text{MFU} = \frac{\text{achieved FLOPs/s}}{\text{peak FLOPs/s of the device}}
+\]
+where \emph{achieved FLOPs/s} $= C \times S / T$,
+with $C$ the FLOPs per token, $S$ the number of tokens processed in interval
+$T$.  For a MiniMind forward + backward pass on a dense model:
+\[
+  C_{\text{dense}} = 6 \times P
+\]
+where $P$ is the number of trainable parameters (the factor of 6 accounts for
+one forward and two backward passes, each costing $\approx 2P$
+multiply-accumulates per token~\citep{chowdhery2023palm}).
+
+For the MoE variant, only the active experts contribute to the compute per
+token, so:
+\[
+  C_{\text{MoE}} = 6 \times P_{\text{active}}
+\]
+where $P_{\text{active}} = P_{\text{base}} + n_{\text{active}} \times
+P_{\text{expert}}$, with $n_{\text{active}}$ the number of experts activated
+per token (default 1 in MiniMind).
+
+Peak FLOPs/s: H100 SXM5 delivers 989\,TFLOPs/s (bf16 tensor core);
+MI350 delivers \PH{peak TFLOPs/s from AMD spec sheet}.
+MFU is computed offline from logged step times by
+\texttt{paper/experiments/compute\_mfu.py}.
+
+\subsection{Inference Metrics}
+\label{sec:methodology:inf}
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{TTFT} (time-to-first-token): wall time from request arrival to
+    first output token, measured at the server level for
+    \texttt{serve\_openai\_api.py} and at the engine level for vLLM / SGLang.
+  \item \textbf{Inter-token latency} (ITL): wall time between consecutive output
+    tokens during decode; reported as p50 and p95 over a 200-request run.
+  \item \textbf{Tokens/s}: aggregate decode throughput across concurrent
+    requests.
+  \item \textbf{Requests/s}: completed requests per second at each concurrency
+    level.
+  \item \textbf{HBM at steady state}: \texttt{torch.cuda.max\_memory\_allocated()}
+    sampled once per second during the benchmark window.
+  \item \textbf{Prefill/decode split}: derived by logging TTFT separately from
+    total generation time.
+\end{itemize}
+
+\subsection{Experimental Configurations}
+\label{sec:methodology:configs}
+
+Table~\ref{tab:configs} summarizes the experimental configurations used
+throughout this paper.  For training, we use the ``mini'' datasets shipped with
+the MiniMind repository, which are sufficient to reproduce the upstream
+single-3090 reference numbers and yield comparable relative performance across
+platforms.  Full dataset hashes are in Appendix~\ref{sec:appendix:data}.
+
+\begin{table}[h]
+\centering
+\caption{Summary of experimental configurations.}
+\label{tab:configs}
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{Dimension} & \textbf{Values} & \textbf{Primary} & \textbf{Note} \\
+\midrule
+Model variant & Dense, MoE & Dense & hidden\_size=768, 8 layers \\
+\# GPUs & 1, 4, 8 & 8 & Single node, DDP \\
+dtype & bf16, fp16 & bf16 & fp16 uses GradScaler \\
+\texttt{torch.compile} & 0, 1 & 0 & LoRA: auto-disabled \\
+Rollout engine & torch, sglang & torch & PPO/GRPO only \\
+Inference engine & HF, vLLM, SGLang & vLLM & Block E \\
+\bottomrule
+\end{tabular}
+\end{table}

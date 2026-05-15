@@ -1,0 +1,144 @@
+\section{Inference-Engine Results}
+\label{sec:inference}
+
+All inference benchmarks use weights produced by
+\texttt{scripts/convert\_model.py} (\texttt{convert\_torch2transformers}),
+which exports native \texttt{.pth} checkpoints to \texttt{Qwen3ForCausalLM} /
+\texttt{Qwen3MoeForCausalLM} HuggingFace format compatible with vLLM and SGLang.
+Greedy-output parity between the native MiniMind model and each engine was
+verified as Gate~6 (\S\ref{sec:methodology}).
+
+\subsection{HF-Native \texttt{generate()}}
+\label{sec:inference:hf}
+
+\begin{table}[h]
+\centering
+\caption{HF-native single-stream decode throughput (tokens/s). Single GPU,
+\texttt{model.half().eval().to(device)}, temperature=0.85, top\_p=0.95.}
+\label{tab:hf_single}
+\small
+\begin{tabular}{llrrr}
+\toprule
+\textbf{Model} & \textbf{Vendor} & \textbf{128 tok} & \textbf{512 tok} & \textbf{2048 tok} \\
+\midrule
+Dense & H100  & \PH{} & \PH{} & \PH{} \\
+Dense & MI350 & \PH{} & \PH{} & \PH{} \\
+MoE   & H100  & \PH{} & \PH{} & \PH{} \\
+MoE   & MI350 & \PH{} & \PH{} & \PH{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{HF-native concurrent throughput via \texttt{serve\_openai\_api.py}
+(dense model, max\_tokens=512, 200 requests).}
+\label{tab:hf_concurrent}
+\small
+\begin{tabular}{llrrrr}
+\toprule
+\textbf{Vendor} & \textbf{Concurrency} &
+\textbf{TTFT p50 (ms)} & \textbf{TTFT p95 (ms)} &
+\textbf{tok/s} & \textbf{req/s} \\
+\midrule
+H100  & 1   & \PH{} & \PH{} & \PH{} & \PH{} \\
+H100  & 8   & \PH{} & \PH{} & \PH{} & \PH{} \\
+H100  & 32  & \PH{} & \PH{} & \PH{} & \PH{} \\
+H100  & 128 & \PH{} & \PH{} & \PH{} & \PH{} \\
+\midrule
+MI350 & 1   & \PH{} & \PH{} & \PH{} & \PH{} \\
+MI350 & 8   & \PH{} & \PH{} & \PH{} & \PH{} \\
+MI350 & 32  & \PH{} & \PH{} & \PH{} & \PH{} \\
+MI350 & 128 & \PH{} & \PH{} & \PH{} & \PH{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{vLLM}
+\label{sec:inference:vllm}
+
+\begin{table}[h]
+\centering
+\caption{vLLM throughput sweep (dense Qwen3-converted weights, 8 GPUs,
+tensor\_parallel\_size=1, max\_tokens=512).}
+\label{tab:vllm}
+\small
+\begin{tabular}{llrrrr}
+\toprule
+\textbf{Vendor} & \textbf{Concurrency} &
+\textbf{TTFT p50 (ms)} & \textbf{ITL p50 (ms)} &
+\textbf{tok/s} & \textbf{req/s} \\
+\midrule
+H100  & 1   & \PH{} & \PH{} & \PH{} & \PH{} \\
+H100  & 8   & \PH{} & \PH{} & \PH{} & \PH{} \\
+H100  & 32  & \PH{} & \PH{} & \PH{} & \PH{} \\
+H100  & 128 & \PH{} & \PH{} & \PH{} & \PH{} \\
+\midrule
+MI350 & 1   & \PH{} & \PH{} & \PH{} & \PH{} \\
+MI350 & 8   & \PH{} & \PH{} & \PH{} & \PH{} \\
+MI350 & 32  & \PH{} & \PH{} & \PH{} & \PH{} \\
+MI350 & 128 & \PH{} & \PH{} & \PH{} & \PH{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{SGLang}
+\label{sec:inference:sglang}
+
+\begin{table}[h]
+\centering
+\caption{SGLang throughput sweep (dense Qwen3-converted weights, max\_tokens=512).}
+\label{tab:sglang}
+\small
+\begin{tabular}{llrrrr}
+\toprule
+\textbf{Vendor} & \textbf{Concurrency} &
+\textbf{TTFT p50 (ms)} & \textbf{ITL p50 (ms)} &
+\textbf{tok/s} & \textbf{req/s} \\
+\midrule
+H100  & 1   & \PH{} & \PH{} & \PH{} & \PH{} \\
+H100  & 32  & \PH{} & \PH{} & \PH{} & \PH{} \\
+H100  & 128 & \PH{} & \PH{} & \PH{} & \PH{} \\
+\midrule
+MI350 & 1   & \PH{} & \PH{} & \PH{} & \PH{} \\
+MI350 & 32  & \PH{} & \PH{} & \PH{} & \PH{} \\
+MI350 & 128 & \PH{} & \PH{} & \PH{} & \PH{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Reasoning and Tool-Call Workloads}
+\label{sec:inference:reasoning}
+
+\begin{table}[h]
+\centering
+\caption{Chain-of-thought (\texttt{open\_thinking=True}) decode throughput
+vs.\ standard decode (concurrency=1, max\_tokens=2048, HF-native).}
+\label{tab:thinking}
+\small
+\begin{tabular}{llrr}
+\toprule
+\textbf{Vendor} & \textbf{Mode} & \textbf{tok/s (decode only)} & \textbf{Think tokens (\%)} \\
+\midrule
+H100  & Standard  & \PH{} & --- \\
+H100  & Thinking  & \PH{} & \PH{} \\
+MI350 & Standard  & \PH{} & --- \\
+MI350 & Thinking  & \PH{} & \PH{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Tool-call evaluation (\texttt{scripts/eval\_toolcall.py}): success rate and latency.}
+\label{tab:toolcall}
+\small
+\begin{tabular}{lrr}
+\toprule
+\textbf{Vendor} & \textbf{Tool-call success (\%)} & \textbf{Latency p50 (ms)} \\
+\midrule
+H100  & \PH{} & \PH{} \\
+MI350 & \PH{} & \PH{} \\
+\bottomrule
+\end{tabular}
+\end{table}

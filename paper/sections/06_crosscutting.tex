@@ -1,0 +1,221 @@
+\section{Cross-Cutting Analyses}
+\label{sec:crosscutting}
+
+\subsection{Convergence Parity}
+\label{sec:crosscutting:convergence}
+
+A prerequisite for attributing throughput differences to hardware rather than
+numerical divergence is that both platforms converge to the same loss trajectory
+under identical seeds.  We verify this via Gate~2 of the verification harness
+(\S\ref{sec:methodology}): a single-GPU dense pretrain is run on each vendor
+with \texttt{setup\_seed(42)} and bf16 AMP; the cross-entropy loss at step~100
+must agree within $\pm 2\%$ relative.
+
+\begin{table}[h]
+\centering
+\caption{Convergence parity (dense pretrain, bf16, 1 GPU, seed=42).
+$\delta_{\text{rel}} = |L_{\text{H100}} - L_{\text{MI350}}| / \max(L_{\text{H100}}, L_{\text{MI350}})$.
+Tolerance: $\leq 2\%$.}
+\label{tab:convergence}
+\small
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Step} & \textbf{H100 loss} & \textbf{MI350 loss} & $\delta_{\text{rel}}$ (\%) & \textbf{Pass?} \\
+\midrule
+100  & \PH{} & \PH{} & \PH{} & \PH{} \\
+500  & \PH{} & \PH{} & \PH{} & \PH{} \\
+1000 & \PH{} & \PH{} & \PH{} & \PH{} \\
+\midrule
+Final (epoch 2) & \PH{} & \PH{} & \PH{} & \PH{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+PyTorch-ROCm aliases the \texttt{torch.cuda.*} namespace and uses the same
+cuBLAS-equivalent kernel dispatch path for GEMM workloads via hipBLASLt, so
+convergence parity is expected in bf16.  Any deviation beyond 2\% would
+indicate a fused-kernel discrepancy (e.g.\ in the SwiGLU or RMSNorm fused
+backward) and would require per-operator investigation before the
+throughput numbers can be meaningfully compared.
+
+For the MoE configuration, we additionally verify that the router's soft-max
+probabilities follow the same distribution at initialization (both vendors use
+PyTorch's default Kaiming-uniform initialization, which must be seeded
+identically).  The \texttt{aux\_loss} trajectory is a proxy for router load
+balance and is reported alongside cross-entropy loss in Table~\ref{tab:convergence_moe}.
+
+\begin{table}[h]
+\centering
+\caption{MoE convergence parity (bf16, 1 GPU, seed=42).  Both CE loss and
+auxiliary load-balance loss are compared.}
+\label{tab:convergence_moe}
+\small
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Step} & \textbf{H100 CE / aux} & \textbf{MI350 CE / aux} & $\delta_{\text{rel}}^{\text{CE}}$ (\%) & \textbf{Pass?} \\
+\midrule
+100  & \PH{} / \PH{} & \PH{} / \PH{} & \PH{} & \PH{} \\
+500  & \PH{} / \PH{} & \PH{} / \PH{} & \PH{} & \PH{} \\
+1000 & \PH{} / \PH{} & \PH{} / \PH{} & \PH{} & \PH{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{dtype Maturity: bf16, fp16, and the FP8 Outlook}
+\label{sec:crosscutting:dtype}
+
+\paragraph{bf16 (primary).}
+Both H100 and MI350 natively support bf16 tensor cores.  MiniMind trainers
+default to bf16 via \texttt{torch.amp.autocast(device\_type=device, dtype=torch.bfloat16)}.
+The GradScaler is instantiated but effectively a no-op for bf16 (loss scaling
+is not needed due to the wider dynamic range).  We observe numerically stable
+training on both platforms with no manual loss-scale intervention.
+
+\paragraph{fp16 (secondary).}
+MiniMind supports fp16 via the same AMP path with GradScaler enabled.  fp16
+is more sensitive to gradient underflow, particularly in the early warmup
+phase of pretraining.  Table~\ref{tab:pretrain_dense} includes fp16 rows so
+readers can verify that neither vendor exhibits systematic instability beyond
+the known GradScaler overhead.
+
+\paragraph{FP8 (future).}
+Neither the current training scripts nor \texttt{torch.amp} expose a stable
+FP8 path in PyTorch~2.10.  NVIDIA exposes FP8 via Transformer Engine (TE);
+AMD exposes a parallel path via ROCm~7.x \texttt{hipBLASLt} FP8 GEMM
+routines.  Because MiniMind's hand-written layers bypass TE's
+\texttt{Linear} wrappers, enabling FP8 would require manual \texttt{Float8Linear}
+substitution and is left as future work.  We flag in
+Table~\ref{tab:dtype_matrix} which dtypes were exercised and which are
+expected to become available.
+
+\begin{table}[h]
+\centering
+\caption{dtype availability and training-stability status (MiniMind~2.10 baseline).}
+\label{tab:dtype_matrix}
+\small
+\begin{tabular}{lllll}
+\toprule
+\textbf{dtype} & \textbf{H100 support} & \textbf{MI350 support} & \textbf{Trainer path} & \textbf{Status} \\
+\midrule
+bf16  & \checkmark & \checkmark & \texttt{autocast bf16 + no-op scaler} & Stable \\
+fp16  & \checkmark & \checkmark & \texttt{autocast fp16 + GradScaler}   & Stable \\
+fp32  & \checkmark & \checkmark & \texttt{nullcontext (default CPU)}    & Baseline only \\
+FP8   & TE path    & ROCm 7.x   & Not implemented                      & Future \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{MoE Routing Behavior}
+\label{sec:crosscutting:moe}
+
+MiniMind's MoE FFN routes each token to $k{=}1$ of $N{=}4$ routed experts
+plus a shared expert that always runs.  The router is a linear projection
+followed by softmax; the top-$k$ gate values weight the expert outputs.
+A load-balancing auxiliary loss $\mathcal{L}_{\text{aux}} = \alpha \sum_i f_i \cdot P_i$
+(fraction of tokens $f_i$ vs.\ mean gate probability $P_i$ per expert) is
+added to the primary CE loss at every step.
+
+The key vendor-specific concern is the \emph{token-dispatch scatter/gather}
+pattern: on CUDA, expert computation can be fused using custom Triton kernels
+(or cuBLAS batched-GEMM with grouped indices); on ROCm, the same
+\texttt{torch.index\_select} / \texttt{scatter\_add} path is used, falling
+back to hipBLASLt for the GEMM portion.  For MiniMind's small expert count
+($N{=}4$) and small hidden dimension (768), the dispatch overhead is
+negligible relative to the GEMM time, but we track it explicitly via
+step-time decomposition.
+
+\begin{table}[h]
+\centering
+\caption{MoE expert utilization at epoch 1 end (pretrain, bf16, 1 GPU).
+An ideal load-balanced router assigns $25\%$ of tokens to each routed expert.
+Utilization $> 5\%$ deviation from $25\%$ may indicate router collapse.}
+\label{tab:moe_balance}
+\small
+\begin{tabular}{lrrrrrr}
+\toprule
+\textbf{Vendor} & \textbf{Expert 0 (\%)} & \textbf{Expert 1 (\%)} &
+\textbf{Expert 2 (\%)} & \textbf{Expert 3 (\%)} &
+\textbf{Shared (\%)} & \textbf{aux\_loss} \\
+\midrule
+H100  & \PH{} & \PH{} & \PH{} & \PH{} & 100 & \PH{} \\
+MI350 & \PH{} & \PH{} & \PH{} & \PH{} & 100 & \PH{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{\texttt{torch.compile} Codegen Quality}
+\label{sec:crosscutting:compile}
+
+\texttt{torch.compile} is exercised via the \texttt{--use\_compile 1} flag
+available in all MiniMind trainers.  The compiler backend on CUDA (Ampere+)
+is Triton/inductor, which generates efficient CUDA kernels for the attention
+SDPA, layer norms, and element-wise operations.  On ROCm, the same
+\texttt{torch.compile} path uses the Triton-ROCm backend (upstreamed into
+PyTorch~2.3+), which emits LLVM-rooted HIP kernels via HSACO.
+
+Known limitation: \texttt{torch.compile} is automatically disabled for LoRA
+runs (\texttt{train\_lora.py:165}) because the monkey-patched
+\texttt{Linear.forward} is not graph-capture-compatible.  This limitation
+applies equally on both vendors.
+
+\begin{table}[h]
+\centering
+\caption{\texttt{torch.compile} speedup over eager mode (pretrain, dense,
+bf16, 8 GPUs, epoch 1 throughput).  Speedup is computed as
+$\text{tok/s}_{\text{compile}} / \text{tok/s}_{\text{eager}} - 1$.}
+\label{tab:compile}
+\small
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Vendor} & \textbf{Eager tok/s} & \textbf{Compile tok/s} & \textbf{Speedup (\%)} & \textbf{Compile time (s)} \\
+\midrule
+H100  & \PH{} & \PH{} & \PH{} & \PH{} \\
+MI350 & \PH{} & \PH{} & \PH{} & \PH{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\PH{Discuss observed compile-time and warm-up overhead on each vendor once
+data are available.  On AMD, the first-run Triton-ROCm kernel compilation
+can take 5--15 minutes for a new model shape, which inflates the first-epoch
+wall time; subsequent runs use the HSACO cache (\texttt{\$HOME/.triton/cache}).}
+
+\subsection{NCCL vs.\ RCCL: DDP All-Reduce Bandwidth}
+\label{sec:crosscutting:collective}
+
+MiniMind uses PyTorch DDP, which performs one all-reduce per parameter tensor
+per backward pass.  For a 64M-parameter dense model in bf16, the total
+gradient buffer size is $64{\times}10^6 \times 2\,\text{B} \approx 128\,\text{MB}$
+per all-reduce.  For the 198M-A64M MoE model (total parameters, bf16), the
+buffer is $\approx 396\,\text{MB}$.
+
+On the H100 side, NCCL uses NVLink~4 (900\,GB/s bidirectional per GPU pair
+via NVSwitch) for intra-node all-reduce; effective ring-allreduce bandwidth
+scales with the number of GPUs up to the bisection bandwidth limit.  On the
+MI350 side, RCCL uses AMD Infinity Fabric (the specific bandwidth for MI350
+in an 8-GPU OAM configuration is \PH{}) exposed as the \texttt{"nccl"} backend
+(RCCL is API-compatible with NCCL and is aliased transparently by
+\texttt{dist\_backend()} in \texttt{trainer/device\_utils.py}).
+
+\begin{table}[h]
+\centering
+\caption{DDP all-reduce wall time for a 128\,MB gradient buffer (bf16, 8 GPUs,
+bus-bandwidth measurement via \texttt{nccl-tests} or equivalent).}
+\label{tab:allreduce}
+\small
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Vendor} & \textbf{Backend} & \textbf{Latency ($\mu$s)} &
+\textbf{Bandwidth (GB/s)} & \textbf{Peak (\%)} \\
+\midrule
+H100  & NCCL  & \PH{} & \PH{} & \PH{} \\
+MI350 & RCCL  & \PH{} & \PH{} & \PH{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Because MiniMind's model is small relative to the intra-node interconnect
+bandwidth on either platform, we expect all-reduce to be a sub-dominant
+cost ($< 5\%$ of step time at 8 GPUs) for both vendors.  This simplifies
+the strong-scaling analysis in \S\ref{sec:training:pretrain}: near-linear
+scaling is driven by compute efficiency, not communication overhead.

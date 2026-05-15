@@ -1,0 +1,77 @@
+\documentclass[11pt]{article}
+
+% ---------- packages ----------
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{listings}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{natbib}
+\usepackage{microtype}
+\usepackage{enumitem}
+
+% placeholder color
+\definecolor{plhcolor}{rgb}{0.7,0.1,0.1}
+\newcommand{\PH}[1][]{\textcolor{plhcolor}{\textbf{[TODO\ifx&#1&\else: #1\fi]}}}
+
+% ---------- metadata ----------
+\title{\textbf{MiniMind on H100 and MI350: A Full-Pipeline Survey of LLM\\
+Training Algorithms and Inference Stacks Across Hardware Vendors}}
+
+\author{Stephen Shao\thanks{AMD, \texttt{yu.shao@amd.com}}
+\and \PH{co-authors}}
+
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We present a systematic survey of large language model training and inference
+across two GPU platforms — NVIDIA H100 (Hopper, CUDA~12, NCCL) and AMD Instinct
+MI350 (CDNA4, ROCm~7.1, RCCL) — using MiniMind, a fully from-scratch,
+hand-implemented LLM pipeline in pure PyTorch, as the experimental vehicle.
+MiniMind covers the full algorithm landscape from BPE tokenization and causal LM
+pretraining through supervised fine-tuning (SFT), parameter-efficient LoRA
+adaptation, knowledge distillation, direct preference optimization (DPO),
+proximal policy optimization (PPO), group-relative policy optimization (GRPO),
+and agent reinforcement learning with tool-call rollouts.  Its vendor-portable
+device abstraction (\texttt{DeviceCtx}) runs the identical trainer scripts
+unmodified on both hardware platforms, making the comparison about
+\emph{hardware and runtime-stack differences} rather than porting effort.
+We run every training stage on 1-, 4-, and 8-GPU configurations, in both dense
+($\approx$64\,M parameters) and mixture-of-experts ($\approx$198\,M-A64M)
+variants, and benchmark inference throughput and latency across HF-native
+\texttt{generate()}, vLLM, and SGLang using Qwen3-compatible weights produced
+by the in-repo conversion script.  We report wall-clock throughput,
+model-FLOP utilization (MFU), peak HBM consumption, and convergence parity for
+every stage.  Our results establish a precise, reproducible baseline for
+vendor-neutral LLM development and highlight where stack divergence remains.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% ---------- sections ----------
+\input{sections/01_intro}
+\input{sections/02_background}
+\input{sections/03_methodology}
+\input{sections/04_training}
+\input{sections/05_inference}
+\input{sections/06_crosscutting}
+\input{sections/07_discussion}
+\input{sections/08_limitations}
+\input{sections/09_related}
+\input{sections/10_appendix}
+
+% ---------- references ----------
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}

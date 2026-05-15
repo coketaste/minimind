@@ -1,0 +1,71 @@
+\section{Introduction}
+\label{sec:intro}
+
+Large language models (LLMs) are now trained and deployed across a rapidly
+diversifying hardware landscape.  While NVIDIA GPUs and the CUDA software stack
+have historically dominated LLM development, AMD Instinct accelerators running
+ROCm are increasingly available in data centers and cloud offerings.  Yet most
+published training results are implicitly CUDA-centric, leaving practitioners
+uncertain about whether their algorithms, training frameworks, and inference
+engines work correctly and efficiently on non-NVIDIA hardware.
+
+Answering this question rigorously requires a \emph{controlled} experimental
+vehicle: a codebase that implements every algorithm from scratch in portable
+PyTorch, with no hidden vendor-specific dependencies, so that any observed
+performance difference is attributable to the hardware and runtime stack rather
+than to library porting gaps.
+
+\paragraph{The MiniMind vehicle.}
+MiniMind~\citep{minimind2024} is an end-to-end LLM pipeline implemented in pure
+PyTorch without relying on \texttt{trl}, \texttt{peft}, or
+\texttt{transformers.Trainer}.  It covers the full training lifecycle in a
+single, coherent codebase: BPE tokenization, causal LM pretraining, supervised
+fine-tuning (SFT), LoRA adaptation, knowledge distillation, direct preference
+optimization (DPO), proximal policy optimization (PPO), group-relative policy
+optimization (GRPO), and agent reinforcement learning with tool-call rollouts.
+Its \texttt{DeviceCtx} abstraction~(\S\ref{sec:methodology}) routes all
+device-specific calls — mixed-precision autocast, gradient scaling, distributed
+rank binding — through a single layer that works unchanged on both CUDA and ROCm,
+making it possible to run the \emph{identical} trainer scripts on both platforms.
+
+\paragraph{Contributions.}
+This paper makes the following contributions:
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{Full-pipeline H100 vs MI350 comparison.}  We run every
+    MiniMind training stage on single-node 1-, 4-, and 8-GPU configurations of
+    both NVIDIA H100 (Hopper, CUDA~12, NCCL) and AMD Instinct MI350 (CDNA4,
+    ROCm~7.1, RCCL), reporting throughput, model-FLOP utilization (MFU), peak
+    HBM consumption, and convergence parity for each.
+
+  \item \textbf{Dense and MoE coverage.}  We benchmark both the dense
+    ($\approx$64\,M-parameter) and mixture-of-experts
+    ($\approx$198\,M-A64\,M) model variants, explicitly exercising
+    MoE-specific token-dispatch and router load-balancing kernels on each vendor.
+
+  \item \textbf{Inference-stack benchmarks.}  Using the in-repo Qwen3
+    conversion path, we benchmark HF-native \texttt{generate()}, vLLM, and
+    SGLang on both platforms across standard workloads: latency, throughput,
+    chain-of-thought reasoning (\texttt{<think>} decoding), and tool-call
+    evaluation.
+
+  \item \textbf{Cross-cutting analysis.}  We characterize convergence parity,
+    \texttt{torch.compile} codegen quality, dtype maturity (bf16 / fp16 / FP8
+    outlook), MoE routing behavior, and intra-node collective communication
+    bandwidth (NCCL vs.\ RCCL) as cross-cutting dimensions.
+
+  \item \textbf{A reproducible benchmark artifact.}  We release all
+    experiment scripts, metric-collection utilities, and exact software version
+    pins so that the community can re-run and extend these results as hardware
+    and software stacks evolve.
+\end{enumerate}
+
+\paragraph{Paper organization.}
+Section~\ref{sec:background} describes the MiniMind architecture, the training
+algorithms covered, and the hardware/software stacks under test.
+Section~\ref{sec:methodology} details our experimental methodology, including
+the vendor-portable code path, reproducibility recipe, and MFU computation.
+Sections~\ref{sec:training}--\ref{sec:inference} present training and inference
+results respectively.  Section~\ref{sec:crosscutting} provides cross-cutting
+analyses.  Sections~\ref{sec:discussion}--\ref{sec:related} discuss implications,
+limitations, and related work, and Section~\ref{sec:appendix} contains the full
+reproducibility appendix.

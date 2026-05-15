@@ -1,0 +1,63 @@
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Cross-vendor GPU benchmarks.}
+Extensive literature exists on comparing NVIDIA and AMD GPU performance for
+deep learning workloads.  \citet{mlperf_training} and \citet{mlperf_inference}~\citep{mlperf2023}
+provide standardized training and inference benchmarks across vendors; however,
+MLPerf focuses on a fixed set of reference models (ResNet, BERT, GPT-3,
+Stable Diffusion) and does not cover the full spectrum of LLM training
+algorithms.  Several independent studies have compared
+ROCm and CUDA on transformer workloads using frameworks such as PyTorch and
+JAX, finding convergent results on most standard operations but noting gaps
+in operator coverage and compilation overhead.  Our work extends this by
+covering \emph{every stage} of the LLM development pipeline rather than a
+single training or inference workload.
+
+\paragraph{Framework-level portability.}
+PyTorch's \texttt{torch.accelerator} and the \texttt{torch.amp} unified API
+represent the framework's answer to vendor portability~\citep{paszke2019pytorch}.
+Earlier work on OpenCL-based portability (e.g.\ PlaidML) did not achieve
+the performance parity of native vendor paths.  The ROCm port of PyTorch,
+maintained by AMD, has reached a level of maturity where the same Python
+source compiles and runs correctly on both CUDA and ROCm; our methodology
+exploits this via the thin \texttt{DeviceCtx} wrapper.
+
+\paragraph{Distributed training systems.}
+Megatron-LM~\citep{narayanan2021efficient} and DeepSpeed~\citep{rajbhandari2020zero} are the
+dominant frameworks for large-scale distributed LLM training, with explicit
+AMD/ROCm support added in recent releases.  Both frameworks have published
+cross-vendor results, but focus on tensor-parallel and pipeline-parallel
+regimes (billions of parameters) that are out of scope for MiniMind's
+DDP-only, single-node setup.
+
+\paragraph{RLHF and alignment training.}
+The PPO-based RLHF paradigm introduced by \citet{ouyang2022training} and the DPO
+simplification of \citet{rafailov2023direct} have been implemented in frameworks such as
+TRL and OpenRLHF, some of which have begun adding ROCm support.  MiniMind's
+hand-written RLHF trainers (PPO, GRPO, DPO) provide an unmediated comparison
+that is not filtered through framework-level abstractions.
+
+\paragraph{MoE model training.}
+Mixture-of-experts scaling was studied extensively in~\citet{gshard,switch_transformer}.
+Vendor-specific MoE kernels (e.g.\ Megablocks~\citep{megablocks}) have been
+developed to reduce token-dispatch overhead on CUDA.  ROCm equivalents via
+Composable Kernel are an active area of development.  Our study uses
+MiniMind's pure-PyTorch MoE dispatch, which avoids custom kernels and
+therefore measures the \emph{baseline} cross-vendor MoE performance
+achievable without vendor-specific tuning.
+
+\paragraph{Inference engine benchmarks.}
+vLLM~\citep{kwon2023efficient} introduced PagedAttention for efficient KV-cache management;
+SGLang~\citep{zheng2024sglang} introduced RadixAttention for prefix sharing.  Both
+engines maintain ROCm branches.  Benchmarks comparing vLLM and SGLang on
+CUDA exist~\citep{zheng2024sglang}, but systematic cross-vendor comparison using
+identical converted weights on the same model is, to our knowledge, not
+previously published.
+
+\paragraph{Small models as research vehicles.}
+The use of small, reproducible models for algorithm research has precedent in
+works such as nanoGPT~\citep{nanogpt} and TinyLlama~\citep{tinyllama}.
+MiniMind extends this tradition by including the full post-training and RLHF
+pipeline as first-class components, making it suitable for cross-vendor
+algorithm coverage studies.
