@@ -34,7 +34,7 @@ wandb==0.18.3
 streamlit==1.50.0
 einops==0.8.1
 swanlab==0.7.11
-modelscope==1.30.0
+modelscope==1.37.0
 # torch==2.10.0
 # torchvision==0.25.0
 pytest==8.3.4

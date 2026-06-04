@@ -4,6 +4,7 @@ import sys
 __package__ = "trainer"
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import datasets  # noqa: F401  # Windows pyarrow/torch DLL conflict workaround (issue #771)
 import argparse
 import time
 import warnings
@@ -243,4 +244,6 @@ if __name__ == "__main__":
             train_epoch(epoch, loader, len(loader), teacher_model, lm_config_student, 0, wandb, args.alpha, args.temperature)
     
     # ========== 9. 清理分布进程 ==========
-    if dist.is_initialized(): dist.destroy_process_group()
+    if dist.is_initialized():
+        dist.barrier()
+        dist.destroy_process_group()
